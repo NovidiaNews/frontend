@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+
+
+:root {
+  --color-main: #36316A;
+  --color-lighter: #6058B3;
+  --color-medium: #7F77D7;
+  --color-light: #A79FFB;
+  --color-lightest: #DFDCFF;
+  --color-superwhite: #F2F0FE;
+
+  /* Semantic tokens — LIGHT theme (default) */
+  --color-app: #F7F6FD;
+  --color-surface: #FFFFFF;
+  --color-surface-raised: #FFFFFF;
+  --color-edge: #E8E6F8;
+  --color-edge-strong: #D2CFF0;
+  --color-ink: #232050;
+  --color-ink-muted: #5C5884;
+  --color-ink-subtle: #8C89AF;
+  --color-accent: #36316A;
+  --color-on-brand: #FFFFFF;
+  --shadow-card: 0 1px 2px rgba(38, 33, 100, 0.05), 0 4px 16px rgba(38, 33, 100, 0.06);
+}
+
+.dark {
+  /* Semantic tokens — DARK theme, zinc scale flipped (zinc-50 → zinc-950) */
+  --color-app: #09090b; /* zinc-950 (app background) */
+  --color-surface: #18181b; /* zinc-900 */
+  --color-surface-raised: #27272a; /* zinc-800 */
+  --color-edge: #3f3f46; /* zinc-700 */
+  --color-edge-strong: #52525b; /* zinc-600 */
+  --color-ink: #fafafa; /* zinc-50 */
+  --color-ink-muted: #a1a1aa; /* zinc-400 */
+  --color-ink-subtle: #71717a; /* zinc-500 */
+  --color-accent: #ffffff;
+  --color-on-brand: #17152e;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.4);
+
+  /* Brand color stays the true brand purple in BOTH themes; buttons and
+     toggles are always brand-filled with white text. The lighter brand
+     shades darken toward deep lavender so white text stays readable on
+     brand gradients, while lightest/superwhite keep working as light
+     accents on the dark chrome. */
+  --color-main: #36316A;
+  --color-lighter: #867fe0;
+  --color-medium: #726bc9;
+  --color-light: #5f58b4;
+  --color-lightest: #e6e3ff;
+  --color-superwhite: rgba(54, 49, 106, 0.1);
+}
+
+/* In dark mode the LIGHT brand background shades are near-white, so any
+   `text-white` sitting on them has to flip to dark ink to stay readable.
+   (`bg-main` is excluded — it is the purple brand fill, so white text on
+   it stays white in both themes.) */
+html.dark :is(.bg-lighter, .bg-medium, .bg-light, .bg-lightest, .bg-superwhite) :is(.text-white) {
+  color: var(--color-on-brand);
+}
+
+/* Semantic utility classes (safe to use everywhere, follow the tokens) */
+.bg-app { background-color: var(--color-app); }
+.bg-surface { background-color: var(--color-surface); }
+.bg-surface-raised { background-color: var(--color-surface-raised); }
+.border-edge { border-color: var(--color-edge); }
+.border-edge-strong { border-color: var(--color-edge-strong); }
+.text-ink { color: var(--color-ink); }
+.text-ink-muted { color: var(--color-ink-muted); }
+.text-ink-subtle { color: var(--color-ink-subtle); }
+.text-on-brand { color: var(--color-on-brand); }
+
+/* Brand-colored text that flips to white on dark chrome —
+   brand purple in light mode, pure white in dark mode. */
+.text-accent { color: var(--color-accent); }
+.shadow-card { box-shadow: var(--shadow-card); }
+
+/* Opacity variants of the semantic tokens (Tailwind can't generate these
+   for manually-defined colors, so they are declared here explicitly) */
+.bg-app\/90 { background-color: color-mix(in srgb, var(--color-app) 90%, transparent); }
+.bg-app\/80 { background-color: color-mix(in srgb, var(--color-app) 80%, transparent); }
+.bg-app\/70 { background-color: color-mix(in srgb, var(--color-app) 70%, transparent); }
+.bg-app\/60 { background-color: color-mix(in srgb, var(--color-app) 60%, transparent); }
+.bg-ink\/40 { background-color: color-mix(in srgb, var(--color-ink) 40%, transparent); }
+.bg-surface-raised\/80 { background-color: color-mix(in srgb, var(--color-surface-raised) 80%, transparent); }
+.bg-surface-raised\/70 { background-color: color-mix(in srgb, var(--color-surface-raised) 70%, transparent); }
+
+/* Brand color opacities (same reasoning as above) */
+.bg-main\/5 { background-color: color-mix(in srgb, var(--color-main) 5%, transparent); }
+.bg-main\/10 { background-color: color-mix(in srgb, var(--color-main) 10%, transparent); }
+.bg-main\/15 { background-color: color-mix(in srgb, var(--color-main) 15%, transparent); }
+.bg-main\/20 { background-color: color-mix(in srgb, var(--color-main) 20%, transparent); }
+.bg-main\/70 { background-color: color-mix(in srgb, var(--color-main) 70%, transparent); }
+
+/* Brand ring color for focus rings on custom-color elements. */
+.ring-brand { --tw-ring-color: color-mix(in srgb, var(--color-main) 30%, transparent); }
+.ring-main\/30 { --tw-ring-color: color-mix(in srgb, var(--color-main) 30%, transparent); }
+.ring-main\/40 { --tw-ring-color: color-mix(in srgb, var(--color-main) 40%, transparent); }
+
+/* Remaining custom-token opacity combos used around the app */
+.bg-lightest\/60 { background-color: color-mix(in srgb, var(--color-lightest) 60%, transparent); }
+.border-lightest\/70 { border-color: color-mix(in srgb, var(--color-lightest) 70%, transparent); }
+.border-main\/20 { border-color: color-mix(in srgb, var(--color-main) 20%, transparent); }
+.border-main\/40 { border-color: color-mix(in srgb, var(--color-main) 40%, transparent); }
+.border-edge\/60 { border-color: color-mix(in srgb, var(--color-edge) 60%, transparent); }
+
+/* Smooth transition when toggling themes */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease !important;
+}
+
+p,h1,h2,h3,h4,h5,h6,span,a,li {
+  font-family: var(--font-montserrat);
+}
+
+.font-fraunces {
+  font-family: var(--font-fraunces), serif;
+}
+
+.font-montserrat {
+  font-family: var(--font-montserrat), sans-serif;
+}
+
+.font-mono, .font-mono p, .font-mono span, .font-mono li, .font-mono h1, .font-mono h2, .font-mono h3, .font-mono h4, .font-mono h5, .font-mono h6, .font-mono a, .font-mono td, .font-mono th {
+  font-family: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+}
+
+.logo-novidia {
+  font-family: var(--font-fraunces), serif;
+  font-weight: 700;
+  font-smooth: always;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-variation-settings:
+    "SOFT" 100,
+    "WONK" 0;
+}
+
+.bg-main { background-color: var(--color-main); }
+.bg-lighter { background-color: var(--color-lighter); }
+.bg-medium { background-color: var(--color-medium); }
+.bg-light { background-color: var(--color-light); }
+.bg-lightest { background-color: var(--color-lightest); }
+.bg-superwhite { background-color: var(--color-superwhite); }
+
+.text-main { color: var(--color-main); }
+.text-lighter { color: var(--color-lighter); }
+.text-medium { color: var(--color-medium); }
+.text-light { color: var(--color-light); }
+.text-lightest { color: var(--color-lightest); }
+.text-superwhite { color: var(--color-superwhite); }
+
+/* In dark mode, all brand text turns white — backgrounds stay unchanged. */
+html.dark .text-main,
+html.dark .text-lighter,
+html.dark .text-medium,
+html.dark .text-light,
+html.dark .text-lightest,
+html.dark .text-superwhite {
+  color: #ffffff;
+}
+
+body.settings-open {
+  overflow: hidden;
+}
+
+body.settings-open #main-content-wrapper {
+  transform: scale(0.975);
+  filter: blur(10px) brightness(0.65);
+  pointer-events: none;
+}
+
+#main-content-wrapper {
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), filter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: center center;
+}
+

@@ -1,0 +1,1049 @@
+"use client";
+
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import ImageSide from "../components/pexels/ImageSide";
+import PasswordInput from "../components/auth/PasswordInput";
+import { NovButton, NovLink, NovIconButton, NovInput, NovCheckbox } from "@/app/components/ui";
+import { motion, AnimatePresence, Variants } from "framer-motion";
+import { Check, Mail, Shield, ArrowRight, Camera, Loader2, Upload, X } from "lucide-react";
+import confetti from "canvas-confetti";
+import { useI18n } from "@/lib/i18n";
+import { sanitizeSvg } from "@/lib/sanitize";
+
+const API_URL = "/api";
+
+interface Toast {
+  id: number;
+  message: string;
+  type: "success" | "error";
+}
+
+function Confetti() {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const myConfetti = confetti.create(canvas, {
+      resize: true,
+      useWorker: true,
+    });
+
+    const count = 200;
+    const defaults = { origin: { y: 0.7 } };
+
+    function fire(particleRatio: number, opts: any) {
+      myConfetti(Object.assign({}, defaults, opts, { particleCount: Math.floor(count * particleRatio) }));
+    }
+
+    fire(0.25, {
+      spread: 26,
+      startVelocity: 55,
+    });
+    fire(0.2, { spread: 60 });
+    fire(0.35, {
+      spread: 100,
+      decay: 0.91,
+      scalar: 0.8,
+    });
+    fire(0.1, {
+      spread: 120,
+      startVelocity: 25,
+      decay: 0.92,
+      scalar: 1.2,
+    });
+    fire(0.1, {
+      spread: 120,
+      startVelocity: 45,
+    });
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="absolute left-0 top-0 w-full h-full pointer-events-none z-20"
+    />
+  );
+}
+
+export default function RegisterPage() {
+  const router = useRouter();
+  const { t } = useI18n();
+
+  // Wizard Steps: 'register' | 'verify' | 'onboarding' | 'success'
+  const [step, setStep] = useState<"register" | "verify" | "onboarding" | "success">("register");
+  
+
+
+  // Loaders & Errors
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, boolean>>({});
+  
+  // Toast notifications
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const showToast = (message: string, type: "success" | "error" = "error") => {
+    const id = Date.now();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
+
+  // Form State
+  const [formData, setFormData] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    username: "",
+    password: "",
+  });
+
+  // TOS Consent State
+  const [tosConsent, setTosConsent] = useState(false);
+
+  // Verification State
+  const [verificationCode, setVerificationCode] = useState("");
+  const [timeLeft, setTimeLeft] = useState(900); // 15 mins
+  const [resendCooldown, setResendCooldown] = useState(30);
+
+  // Onboarding State
+  const [selectedAvatar, setSelectedAvatar] = useState<string>("");
+  const [hasUploadedCustomImage, setHasUploadedCustomImage] = useState(false);
+  const [bio, setBio] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Temporary token stored during steps
+  const [tempToken, setTempToken] = useState<string | null>(null);
+
+  // Crop Modal State
+  const [cropImage, setCropImage] = useState<string | null>(null);
+  const [cropZoom, setCropZoom] = useState(1);
+  const [cropOffset, setCropOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const cropImgRef = useRef<HTMLImageElement | null>(null);
+  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
+
+  // Initialize UI-Avatars URL when name changes
+  useEffect(() => {
+    if (formData.firstName || formData.lastName) {
+      const nameParam = encodeURIComponent(`${formData.firstName} ${formData.lastName}`.trim() || "User");
+      const url = `https://ui-avatars.com/api/?name=${nameParam}&background=random&color=fff&size=200&bold=true`;
+      if (!hasUploadedCustomImage) {
+        setTimeout(() => setSelectedAvatar(url), 0);
+      }
+    }
+  }, [formData.firstName, formData.lastName, hasUploadedCustomImage]);
+
+  // Keep cropping offset bounded so users cannot drag/zoom outside image bounds
+  useEffect(() => {
+    if (!cropImage || imageSize.width === 0 || imageSize.height === 0) return;
+    const W = imageSize.width * cropZoom;
+    const H = imageSize.height * cropZoom;
+    
+    const minX = 96 - W / 2;
+    const maxX = -96 + W / 2;
+    const minY = 96 - H / 2;
+    const maxY = -96 + H / 2;
+    
+    setTimeout(() => {
+        setCropOffset((prev) => ({
+          x: Math.max(minX, Math.min(maxX, prev.x)),
+          y: Math.max(minY, Math.min(maxY, prev.y)),
+        }));
+    }, 0);
+  }, [cropZoom, imageSize, cropImage]);
+
+  // Verification timer countdown
+  useEffect(() => {
+    if (step !== "verify" || timeLeft <= 0) return;
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [step, timeLeft]);
+
+  // Resend code cooldown countdown
+  useEffect(() => {
+    if (step !== "verify" || resendCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setResendCooldown((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [step, resendCooldown]);
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60).toString().padStart(2, "0");
+    const s = (seconds % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  };
+
+  // Step 1: Submit Register Form
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setErrors({});
+
+    // Client-side verification
+    const newErrors: Record<string, boolean> = {};
+    if (!formData.firstName) newErrors.firstName = true;
+    if (!formData.lastName) newErrors.lastName = true;
+    if (!formData.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) newErrors.email = true;
+    if (!formData.username) newErrors.username = true;
+    if (!formData.password || formData.password.length < 8) newErrors.password = true;
+    if (!tosConsent) newErrors.tosConsent = true;
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      if (newErrors.tosConsent) {
+        showToast(t("register.tosRequired"));
+      } else {
+        showToast(t("register.fillFields"));
+      }
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/users/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...formData, consentToTOS: tosConsent }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (data.message && data.message.toLowerCase().includes("e-mail") || data.message.toLowerCase().includes("istnieje")) {
+          setErrors({ email: true, username: true });
+        }
+        throw new Error(data.message || t("register.registerError"));
+      }
+
+      setTempToken(data.token);
+      setTimeLeft(900); // Reset timer to 15 mins
+      setResendCooldown(30); // Reset cooldown
+      setStep("verify");
+      showToast(t("register.accountCreated"), "success");
+    } catch (err: any) {
+      showToast(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Submit Verification Code
+  const handleVerifySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    const code = verificationCode;
+    if (code.length < 6) {
+      showToast(t("register.codeIncomplete"));
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/users/verify-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: formData.email, code }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || t("register.verifyError"));
+      }
+
+      setTempToken(data.token);
+      showToast(t("register.verifySuccess"), "success");
+
+      if (data.status === "success") {
+        localStorage.setItem("novidia_user", JSON.stringify(data.user));
+        window.dispatchEvent(new Event("novidia_auth_change"));
+        setStep("success");
+      } else {
+        setStep("onboarding");
+      }
+    } catch (err: any) {
+      showToast(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Resend Code
+  const handleResendCode = async () => {
+    try {
+      const res = await fetch(`${API_URL}/users/resend-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: formData.email }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || t("register.codeSendError"));
+      }
+      setTimeLeft(900); // Reset timer
+      setResendCooldown(30); // Reset cooldown
+      setVerificationCode("");
+      showToast(t("register.codeResent"), "success");
+    } catch (err: any) {
+      showToast(err.message);
+    }
+  };
+
+  // Handle Photo Selection
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") {
+        setCropImage(reader.result);
+        setCropZoom(1);
+        setCropOffset({ x: 0, y: 0 });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Crop drag event handlers
+  const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
+    setIsDragging(true);
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+    setDragStart({ x: clientX - cropOffset.x, y: clientY - cropOffset.y });
+  };
+
+  const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isDragging) return;
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+    
+    const rawX = clientX - dragStart.x;
+    const rawY = clientY - dragStart.y;
+    
+    if (imageSize.width > 0 && imageSize.height > 0) {
+      const W = imageSize.width * cropZoom;
+      const H = imageSize.height * cropZoom;
+      const minX = 96 - W / 2;
+      const maxX = -96 + W / 2;
+      const minY = 96 - H / 2;
+      const maxY = -96 + H / 2;
+      
+      setCropOffset({
+        x: Math.max(minX, Math.min(maxX, rawX)),
+        y: Math.max(minY, Math.min(maxY, rawY)),
+      });
+    } else {
+      setCropOffset({ x: rawX, y: rawY });
+    }
+  };
+
+  const handleDragEnd = () => {
+    setIsDragging(false);
+  };
+
+  // Process Crop and generate base64 output
+  const handleCropApply = () => {
+    if (!cropImage || !cropImgRef.current) return;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 200;
+    canvas.height = 200;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const img = cropImgRef.current;
+    
+    // Fit dimensions calculated during load
+    const fitW = imageSize.width;
+    const fitH = imageSize.height;
+
+    ctx.clearRect(0, 0, 200, 200);
+
+    // Apply circular clipping path
+    ctx.beginPath();
+    ctx.arc(100, 100, 100, 0, Math.PI * 2);
+    ctx.clip();
+
+    // Map viewport coordinates
+    const scaleFactor = 200 / 192; // modal viewport size in UI is 192px
+    ctx.scale(scaleFactor, scaleFactor);
+    
+    // Translate and draw
+    ctx.translate(96 + cropOffset.x, 96 + cropOffset.y);
+    ctx.scale(cropZoom, cropZoom);
+    ctx.drawImage(img, -fitW / 2, -fitH / 2, fitW, fitH);
+
+    const croppedBase64 = canvas.toDataURL("image/jpeg", 0.9);
+    setSelectedAvatar(croppedBase64);
+    setHasUploadedCustomImage(true);
+    setCropImage(null);
+    showToast(t("register.avatarUpdated"), "success");
+  };
+
+  // Submit Onboarding
+  const handleOnboardingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const res = await fetch(`${API_URL}/users/onboarding`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${tempToken}`,
+        },
+        body: JSON.stringify({
+          profilePicture: selectedAvatar,
+          bio,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || t("register.avatarError"));
+      }
+
+      localStorage.setItem("novidia_user", JSON.stringify(data.user));
+      window.dispatchEvent(new Event("novidia_auth_change"));
+      setStep("success");
+    } catch (err: any) {
+      showToast(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const slideVariants: Variants = {
+    enter: { x: 100, opacity: 0 },
+    center: { x: 0, opacity: 1, transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] } },
+    exit: { x: -100, opacity: 0, transition: { duration: 0.3, ease: [0.4, 0, 1, 1] } },
+  };
+
+  return (
+    <div className="w-full h-screen absolute inset-0 pointer-events-none z-1">
+      
+      {/* Toast Notification Container */}
+      <div className="fixed bottom-6 right-6 z-100 flex flex-col gap-6 pointer-events-none">
+        <AnimatePresence>
+          {Object.entries(
+            toasts.reduce<Record<string, Toast[]>>((acc, t) => {
+              if (!acc[t.message]) acc[t.message] = [];
+              acc[t.message].push(t);
+              return acc;
+            }, {})
+          ).map(([message, group]) => {
+            const latestToast = group[group.length - 1];
+            
+            return (
+              <motion.div
+                key={message}
+                layout
+                initial={{ opacity: 0, y: 50, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20, transition: { duration: 0.2 } }}
+                transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                className="relative pointer-events-auto"
+              >
+                <div className="pointer-events-auto flex flex-col gap-1.5 max-w-sm min-w-17.5">
+                  {/* Above the main box: 2 bars, count badge, and close button */}
+                  <div className="flex items-center justify-between gap-3 w-full px-1">
+                    {/* 2 bars */}
+                    <div className="grow flex items-center h-1 gap-2">
+                      {/* Left part (filled) */}
+                      <motion.div 
+                        key={`${latestToast.id}-left`}
+                        initial={{ flexGrow: 0, flexBasis: 0 }}
+                        animate={{ flexGrow: 100 }}
+                        transition={{ duration: 4, ease: "linear" }}
+                        className={`h-1 rounded-full ${latestToast.type === "error" ? "bg-red-500" : "bg-green-500"}`}
+                      />
+                      {/* Right part (empty) */}
+                      <motion.div 
+                        key={`${latestToast.id}-right`}
+                        initial={{ flexGrow: 100, opacity: 1 }}
+                        animate={{ flexGrow: 0, opacity: 0 }}
+                        transition={{ duration: 4, ease: "linear" }}
+                        className="h-1 rounded-full bg-edge-strong"
+                        style={{ flexBasis: 0 }}
+                      />
+                    </div>
+
+                    {/* iOS-like count badge */}
+                    {group.length > 1 && (
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 select-none font-bold shadow-sm border ${
+                        latestToast.type === "error" 
+                          ? "bg-red-100 border-red-200 text-red-800" 
+                          : "bg-green-100 border-green-200 text-green-800"
+                      }`}>
+                        {group.length}
+                      </span>
+                    )}
+
+                    {/* Close Button: floating X in a round box */}
+                    <NovIconButton
+                      unstyled
+                      onClick={() => {
+                        setToasts((prev) => prev.filter((item) => item.message !== message));
+                      }}
+                      className={`w-6 h-6 rounded-full border cursor-pointer transition-colors shrink-0 flex items-center justify-center shadow-sm bg-surface hover:bg-surface-raised ${
+                        latestToast.type === "error" ? "border-red-200 text-red-800" : "border-green-200 text-green-800"
+                      }`}
+                    >
+                      <X size={12} className="stroke-[2.5px]" />
+                    </NovIconButton>
+                  </div>
+
+                  {/* The Main Box */}
+                  <div className="relative w-full">
+                    {/* Background iOS Stack Cards */}
+                    {group.length > 2 && (
+                      <div 
+                        className={`absolute inset-0 rounded-xl border shadow-sm scale-[0.92] translate-y-4 opacity-40 -z-20 transition-all duration-300 ${
+                          latestToast.type === "error" ? "bg-red-50 border-red-200" : "bg-green-50 border-green-200"
+                        }`}
+                      />
+                    )}
+                    {group.length > 1 && (
+                      <div 
+                        className={`absolute inset-0 rounded-xl border shadow-md scale-[0.96] translate-y-2 opacity-70 -z-10 transition-all duration-300 ${
+                          latestToast.type === "error" ? "bg-red-50 border-red-200" : "bg-green-50 border-green-200"
+                        }`}
+                      />
+                    )}
+
+                    <div
+                      className={`p-4 rounded-xl shadow-md border text-sm font-semibold text-left leading-snug w-full transition-all ${
+                        latestToast.type === "error"
+                          ? "bg-red-50 border-red-200 text-red-800"
+                          : "bg-green-50 border-green-200 text-green-800"
+                      }`}
+                    >
+                      {latestToast.message}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+      </div>
+
+      {/* CROP MODAL OVERLAY */}
+      {cropImage && (
+        <div className="fixed inset-0 bg-black/70 z-110 flex items-center justify-center p-4 pointer-events-auto">
+          <div className="bg-surface rounded-2xl p-6 w-full max-w-md flex flex-col gap-5 shadow-2xl">
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-bold text-ink font-montserrat">{t("register.avatarTitle")}</h3>
+              <NovIconButton
+                unstyled
+                onClick={() => setCropImage(null)}
+                className="text-ink-muted hover:text-ink cursor-pointer"
+              >
+                <X size={20} />
+              </NovIconButton>
+            </div>
+
+            {/* Draggable Viewport Container */}
+            <div 
+              className="w-full h-72 relative overflow-hidden bg-surface-raised rounded-2xl flex items-center justify-center cursor-move"
+              onMouseDown={handleDragStart}
+              onMouseMove={handleDragMove}
+              onMouseUp={handleDragEnd}
+              onMouseLeave={handleDragEnd}
+              onTouchStart={handleDragStart}
+              onTouchMove={handleDragMove}
+              onTouchEnd={handleDragEnd}
+            >
+              <img
+                ref={(el) => {
+                  cropImgRef.current = el;
+                }}
+                src={cropImage}
+                alt="To Crop"
+                draggable={false}
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  const cropSize = 192; // cutout circle size
+                  let w = img.naturalWidth;
+                  let h = img.naturalHeight;
+                  if (w > h) {
+                    h = cropSize;
+                    w = (img.naturalWidth / img.naturalHeight) * cropSize;
+                  } else {
+                    w = cropSize;
+                    h = (img.naturalHeight / img.naturalWidth) * cropSize;
+                  }
+                  setImageSize({ width: w, height: h });
+                }}
+                style={{
+                  transform: `translate(${cropOffset.x}px, ${cropOffset.y}px) scale(${cropZoom})`,
+                  width: imageSize.width || "auto",
+                  height: imageSize.height || "auto",
+                  userSelect: "none",
+                }}
+                className="max-w-none transition-transform duration-75 select-none"
+              />
+              {/* Circular Cutout Layer */}
+              <div className="absolute w-48 h-48 rounded-full border-2 border-white pointer-events-none shadow-[0_0_0_9999px_rgba(0,0,0,0.65)]" />
+            </div>
+
+            {/* Zoom Slider */}
+            <div className="flex flex-col gap-1.5 relative select-none">
+              <span className="text-xs text-ink-muted font-semibold font-montserrat">{t("register.avatarZoom")}</span>
+              
+              <div className="w-full h-8 relative flex items-center">
+                {/* Transparent input range that handles interactions */}
+                <input
+                  type="range"
+                  min="1"
+                  max="3"
+                  step="0.05"
+                  value={cropZoom}
+                  onChange={(e) => setCropZoom(parseFloat(e.target.value))}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                />
+                
+                {/* Custom Track & Handle Layout */}
+                <div className="w-full flex items-center h-1 gap-3 pointer-events-none z-0">
+                  {/* Left segment (filled) */}
+                  <div 
+                    className="h-1 bg-main rounded-full transition-all duration-75"
+                    style={{ flexGrow: Math.max(0.001, ((cropZoom - 1) / 2) * 100), flexBasis: 0 }}
+                  />
+                  {/* Handle */}
+                  <div className="w-1.25 h-5 rounded-full bg-main shrink-0" />
+                  {/* Right segment (empty) */}
+                  <div 
+                    className="h-1 bg-surface-raised rounded-full transition-all duration-75"
+                    style={{ flexGrow: Math.max(0.001, 100 - ((cropZoom - 1) / 2) * 100), flexBasis: 0 }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-2">
+              <NovButton
+                unstyled
+                onClick={() => setCropImage(null)}
+                className="w-1/2 py-3 rounded-xl border border-edge text-ink-muted font-semibold hover:bg-surface-raised transition-colors cursor-pointer text-sm"
+              >
+                Anuluj
+              </NovButton>
+              <NovButton
+                unstyled
+                onClick={handleCropApply}
+                className="w-1/2 py-3 rounded-xl bg-main hover:brightness-110 text-white font-semibold transition-all cursor-pointer text-sm"
+              >
+                {t("register.avatarConfirm")}
+              </NovButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <main className="relative w-full h-screen flex flex-col md:flex-row gap-6 p-4 pt-25">
+        
+        {/* LEFT SIDE */}
+        <ImageSide />
+
+        {/* RIGHT SIDE */}
+        <div className="w-full h-full rounded-2xl bg-surface-raised flex pointer-events-auto justify-center overflow-y-auto relative">
+          {step === "success" && <Confetti />}
+          <div className="w-full max-w-lg flex flex-col self-center p-8 md:p-12 relative">
+            
+            {/* Step Progress Line - 2 boxes (left expanding, right shrinking), 4 gap, 2 height */}
+            <div className="w-full flex items-center h-1.5 gap-4 mb-8">
+              <div 
+                className="h-1.5 bg-main transition-all duration-500 ease-out rounded-full"
+                style={{
+                  flexGrow: 
+                    step === "register" ? 25 :
+                    step === "verify" ? 50 :
+                    step === "onboarding" ? 75 : 100,
+                  flexBasis: 0
+                }}
+              />
+              {step !== "success" && (
+                <div 
+                  className="h-1.5 bg-surface-raised transition-all duration-500 ease-out rounded-full"
+                  style={{
+                    flexGrow: 
+                      step === "register" ? 75 :
+                      step === "verify" ? 50 :
+                      step === "onboarding" ? 25 : 0.001,
+                    flexBasis: 0
+                  }}
+                />
+              )}
+            </div>
+
+            <AnimatePresence mode="wait">
+              {/* STEP 1: REGISTER */}
+              {step === "register" && (
+                <motion.div
+                  key="register"
+                  variants={slideVariants}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
+                  className="flex flex-col gap-6"
+                >
+                  <div>
+                    <h1 className="text-4xl font-bold tracking-tight text-main font-fraunces mb-2">
+                      {t("register.title")}
+                    </h1>
+                    <p className="text-ink-muted font-medium text-sm">
+                      {t("register.desc")}
+                    </p>
+                  </div>
+
+                  {loading ? (
+                    <div className="flex flex-col gap-4 py-2">
+                      <div className="flex gap-4">
+                        <div className="w-1/2 h-14 bg-surface-raised rounded-xl animate-pulse" />
+                        <div className="w-1/2 h-14 bg-surface-raised rounded-xl animate-pulse" />
+                      </div>
+                      <div className="w-full h-14 bg-surface-raised rounded-xl animate-pulse" />
+                      <div className="w-full h-14 bg-surface-raised rounded-xl animate-pulse" />
+                      <div className="w-full h-16 bg-surface-raised rounded-xl animate-pulse" />
+                      <div className="w-full h-6 bg-surface-raised/70 rounded-lg animate-pulse mt-2" />
+                      <div className="w-full h-14 bg-edge-strong rounded-xl animate-pulse mt-4" />
+                    </div>
+                  ) : (
+                    <form onSubmit={handleRegisterSubmit} className="flex flex-col gap-4">
+                      <div className="flex gap-4">
+                        <div className="flex-1 min-w-0">
+                          <NovInput
+                            unstyled
+                            type="text"
+                            placeholder={t("register.firstNamePlaceholder")}
+                            value={formData.firstName}
+                            onChange={(e) => {
+                              setFormData({ ...formData, firstName: e.target.value });
+                              setErrors({ ...errors, firstName: false });
+                            }}
+                            className="w-full h-14 rounded-xl px-4 border border-edge bg-transparent text-sm text-ink placeholder:text-ink-subtle focus:outline-none focus:ring-2 focus:ring-main focus:border-transparent"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <NovInput
+                            unstyled
+                            type="text"
+                            placeholder={t("register.lastNamePlaceholder")}
+                            value={formData.lastName}
+                            onChange={(e) => {
+                              setFormData({ ...formData, lastName: e.target.value });
+                              setErrors({ ...errors, lastName: false });
+                            }}
+                            className="w-full h-14 rounded-xl px-4 border border-edge bg-transparent text-sm text-ink placeholder:text-ink-subtle focus:outline-none focus:ring-2 focus:ring-main focus:border-transparent"
+                          />
+                        </div>
+                      </div>
+                      
+                      <NovInput
+                        type="email"
+                        placeholder={t("register.emailPlaceholder")}
+                        value={formData.email}
+                        onChange={(e) => {
+                          setFormData({ ...formData, email: e.target.value });
+                          setErrors({ ...errors, email: false });
+                        }}
+                        error={errors.email}
+                        className="h-14 text-center"
+                      />
+
+                      <NovInput
+                        type="text"
+                        placeholder={t("register.usernamePlaceholder")}
+                        value={formData.username}
+                        onChange={(e) => {
+                          setFormData({ ...formData, username: e.target.value });
+                          setErrors({ ...errors, username: false });
+                        }}
+                        error={errors.username}
+                        className="h-14 text-center"
+                      />
+
+                      <PasswordInput
+                        value={formData.password}
+                        onChange={(val) => {
+                          setFormData({ ...formData, password: val });
+                          setErrors({ ...errors, password: false });
+                        }}
+                        placeholder={t("register.passwordPlaceholder")}
+                        className={errors.password ? "border-2 border-red-500 ring-2 ring-red-500/20" : ""}
+                      />
+
+                      {/* Animated TOS Consent Checkbox */}
+                      <div className="flex items-center gap-3 mt-2 px-1">
+                        <NovCheckbox
+                          checked={tosConsent}
+                          onChange={(checked) => {
+                            setTosConsent(checked);
+                            setErrors({ ...errors, tosConsent: false });
+                          }}
+                          error={errors.tosConsent}
+                        />
+                        <span className="text-ink-muted font-medium text-xs select-none">
+                          {t("register.tosPrefix")}{" "}
+                          <a href="/tos" target="_blank" className="text-main font-semibold hover:underline">
+                            {t("register.tosLink")}
+                          </a>{" "}
+                          {t("register.tosSuffix")}
+                        </span>
+                      </div>
+
+                      <NovButton
+                        type="submit"
+                        variant="main"
+                        size="xl"
+                        fullWidth
+                        className="mt-2"
+                      >
+                        <span>Dalej</span>
+                        <ArrowRight size={16} />
+                      </NovButton>
+                    </form>
+                  )}
+
+                  <div className="flex flex-row gap-4 mt-4 justify-center items-center">
+                    <p className="text-center text-ink-muted text-xs">
+                      Masz już konto?{" "}
+                      <NovLink href="/login" variant="text">
+                        Zaloguj się
+                      </NovLink>
+                    </p>
+                    <div className="w-1 h-1 bg-edge-strong rounded-full"></div>
+                    <p className="text-center text-ink-muted text-xs">
+                      <NovLink href="/register/school" variant="text">
+                        Zarejestruj się jako szkoła
+                      </NovLink>
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* STEP 2: MAIL VERIFICATION */}
+              {step === "verify" && (
+                <motion.div
+                  key="verify"
+                  variants={slideVariants}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
+                  className="flex flex-col gap-6"
+                >
+                  <div className="text-center">
+                    <div className="mx-auto w-16 h-16 bg-lightest text-main rounded-2xl flex items-center justify-center mb-4">
+                      <Mail size={32} />
+                    </div>
+                    <h1 className="text-3xl font-bold text-main font-fraunces mb-2">
+                      Potwierdź swój e-mail
+                    </h1>
+                    <p className="text-ink-muted text-sm max-w-sm mx-auto font-montserrat">
+                      Wysłaliśmy 6-cyfrowy kod na adres <span className="font-semibold text-ink">{formData.email}</span>.
+                    </p>
+                  </div>
+
+                  {loading ? (
+                    <div className="flex flex-col gap-6 py-2">
+                      <div className="w-full h-14 bg-surface-raised rounded-xl animate-pulse" />
+                      <div className="w-1/2 h-4 bg-surface-raised rounded animate-pulse mx-auto" />
+                      <div className="w-full h-14 bg-edge-strong rounded-xl animate-pulse" />
+                    </div>
+                  ) : (
+                    <form onSubmit={handleVerifySubmit} className="flex flex-col gap-6">
+                      <NovInput
+                        unstyled
+                        type="text"
+                        maxLength={6}
+                        placeholder={t("register.verifyPlaceholder")}
+                        value={verificationCode}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/[^0-9]/g, "").substring(0, 6);
+                          setVerificationCode(val);
+                        }}
+                        className="w-full h-14 rounded-xl border border-edge text-center font-semibold text-lg text-ink focus:outline-none focus:ring-2 focus:ring-main focus:border-transparent bg-surface shadow-sm placeholder:text-ink-muted placeholder:text-sm placeholder:font-normal"
+                      />
+
+                      <NovButton
+                        type="submit"
+                        variant="main"
+                        size="xl"
+                        fullWidth
+                        disabled={timeLeft <= 0}
+                      >
+                        <span>Zweryfikuj e-mail</span>
+                        <Check size={16} />
+                      </NovButton>
+
+                      <div className="flex flex-col items-center gap-1 h-fit">
+                        {resendCooldown <= 0 && (
+                          <p className="text-ink-muted text-xs font-montserrat flex items-center gap-1.5">
+                            Didn't receive?{" "}
+                            <NovButton
+                              type="button"
+                              variant="text"
+                              size="none"
+                              onClick={handleResendCode}
+                            >
+                              Resend!
+                            </NovButton>
+                          </p>
+                        )}
+                      </div>
+                    </form>
+                  )}
+
+                  <div className="flex justify-center items-center text-xs mt-2 border-t border-edge pt-4">
+                    <NovButton
+                      unstyled
+                      onClick={() => setStep("register")}
+                      className="text-ink-muted hover:text-ink transition-colors font-medium cursor-pointer"
+                    >
+                      Zmień e-mail
+                    </NovButton>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* STEP 3: ONBOARDING */}
+              {step === "onboarding" && (
+                <motion.div
+                  key="onboarding"
+                  variants={slideVariants}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
+                  className="flex flex-col gap-6"
+                >
+                  <div className="flex justify-between items-center">
+                    <h1 className="text-3xl font-bold text-main font-fraunces">
+                      Uzupełnij profil
+                    </h1>
+                  </div>
+
+                  {loading ? (
+                    <div className="flex flex-col items-center gap-6 py-4">
+                      <div className="w-48 h-6 bg-surface-raised rounded animate-pulse" />
+                      <div className="w-32 h-4 bg-surface-raised rounded animate-pulse" />
+                      <div className="w-36 h-36 bg-surface-raised rounded-full animate-pulse" />
+                      <div className="w-full max-w-xs h-14 bg-edge-strong rounded-xl animate-pulse mt-4" />
+                    </div>
+                  ) : (
+                    <form onSubmit={handleOnboardingSubmit} className="flex flex-col gap-6">
+                      <div className="flex flex-col items-center gap-6 py-4">
+                        <div className="text-center">
+                          <h2 className="text-lg font-bold text-ink font-montserrat mb-1">
+                            Wybierz zdjęcie profilowe
+                          </h2>
+                          <p className="text-xs text-ink-muted font-montserrat">
+                            Wgraj własne zdjęcie lub przejdź dalej z domyślnym awatarem.
+                          </p>
+                        </div>
+
+                        {/* Preview Wrapper */}
+                        <div className="relative w-36 h-36">
+                          <div className="w-full h-full rounded-full shadow-lg overflow-hidden bg-surface-raised flex items-center justify-center">
+                            {selectedAvatar.startsWith("<svg") ? (
+                              <div 
+                                className="w-full h-full"
+                                dangerouslySetInnerHTML={{ __html: sanitizeSvg(selectedAvatar) }}
+                              />
+                            ) : (
+                              <img
+                                src={selectedAvatar}
+                                alt="Avatar"
+                                className="w-full h-full object-cover"
+                                draggable={false}
+                              />
+                            )}
+                          </div>
+                          
+                          {/* Camera Upload Button */}
+                          <NovIconButton
+                            unstyled
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="absolute bottom-1 right-1 w-10 h-10 bg-surface-raised hover:bg-edge-strong text-ink-muted rounded-full flex items-center justify-center shadow-lg border-4 border-edge cursor-pointer transition-all"
+                          >
+                            <Camera size={18} />
+                          </NovIconButton>
+                          
+                          <NovInput
+                            unstyled
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={handlePhotoSelect}
+                            className="hidden"
+                          />
+                        </div>
+
+                        {/* Submit button */}
+                        <NovButton
+                          unstyled
+                          type="submit"
+                          className="w-full max-w-xs h-14 rounded-xl bg-main hover:brightness-115 text-white font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer text-sm mt-4"
+                        >
+                          <>
+                            <span>{hasUploadedCustomImage ? "OK" : "Pomiń"}</span>
+                            <ArrowRight size={16} />
+                          </>
+                        </NovButton>
+                      </div>
+                    </form>
+                  )}
+                </motion.div>
+              )}
+
+              {/* STEP 4: SUCCESS VIEW */}
+              {step === "success" && (
+                <motion.div
+                  key="success"
+                  variants={slideVariants}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
+                  className="flex flex-col items-center justify-center text-center gap-6 py-8 relative"
+                >
+                  <div className="w-20 h-20 rounded-full bg-green-100 border border-green-200 text-green-600 flex items-center justify-center mb-2 shadow-sm">
+                    <Check size={40} className="stroke-[3px]" />
+                  </div>
+                  <div>
+                    <h1 className="text-3xl font-bold text-main font-fraunces mb-2">
+                      Konto jest gotowe!
+                    </h1>
+                    <p className="text-ink-muted font-medium text-sm max-w-xs mx-auto">
+                      Twój profil został pomyślnie skonfigurowany. Witamy w społeczności redakcyjnej Novidii!
+                    </p>
+                  </div>
+                  <NovButton
+                    onClick={() => router.push("/")}
+                    variant="main"
+                    size="xl"
+                    fullWidth
+                    className="max-w-xs"
+                  >
+                    <span>Przejdź do strony głównej</span>
+                    <ArrowRight size={16} />
+                  </NovButton>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+          </div>
+        </div>
+
+      </main>
+    </div>
+  );
+}
