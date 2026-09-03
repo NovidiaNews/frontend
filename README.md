@@ -1,36 +1,208 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+<div align="center">
+
+<img src="https://github.com/NovidiaNews/NovidiaNews/blob/main/images/TW.png?raw=true" alt="Novidia Logo" width="1800"/>
+
+# Novidia
+
+A modern publishing platform built for Polish schools.
+
+Students and teachers can create, publish, and share articles in a secure, privacy-focused environment designed specifically for education.
+
+![License](https://img.shields.io/badge/license-Proprietary-red)
+![TypeScript](https://img.shields.io/badge/TypeScript-blue)
+![Next.js](https://img.shields.io/badge/Next.js-black)
+![Fastify](https://img.shields.io/badge/Fastify-green)
+
+</div>
+
+---
+
+![Home Page](https://github.com/NovidiaNews/NovidiaNews/blob/main/images/Article.png?raw=true)
+
+## Overview
+
+Novidia is a modern journalism platform that enables schools to build their own online newspaper.
+
+Designed with the Polish educational ecosystem in mind, the platform allows students to write articles, teachers to moderate content, and administrators to manage schools through an intuitive interface while maintaining a strong focus on privacy and security.
+
+---
+
+## Features
+
+### Writing
+
+- ✍️ Markdown-based article editor
+- 📄 Drafts and publishing workflow
+- 🕒 Article version history
+- 🌍 Multi-language support
+- 🎨 Light and dark themes
+
+### Schools
+
+- 🏫 School registration
+- 🔍 RSPO integration
+- ✅ School verification
+
+### Administration
+
+- 👥 User management
+- 📝 Article moderation
+- 📊 Analytics dashboard
+- 🔒 Security monitoring
+
+---
+
+## Technology
+
+### Frontend
+
+- Next.js
+- React
+- Tailwind CSS
+- Framer Motion
+
+### Backend
+
+- Fastify
+- Prisma
+- PostgreSQL
+
+### Infrastructure
+
+- Docker
+- JWT Authentication
+- OAuth2 (Google & Discord)
+- SMTP Email
+- Crowdin
+
+---
 
 ## Getting Started
 
-First, run the development server:
+### Requirements
+
+- Node.js 18+
+- PostgreSQL
+- npm or pnpm
+
+### Clone the repositories
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone git@github.com:NovidiaNews/backend.git
+git clone git@github.com:NovidiaNews/frontend.git
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Backend
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cd backend
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+npm install
 
-## Learn More
+cp .env.example .env
 
-To learn more about Next.js, take a look at the following resources:
+docker compose up -d
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+npx prisma migrate dev
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+npm run dev
+```
 
-## Deploy on Vercel
+### Frontend
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+cd frontend
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+npm install
+
+cp .env.example .env.local
+
+npm run dev
+```
+
+The frontend runs on **localhost:3000** and communicates with the backend running on **localhost:3001**.
+
+---
+
+## Configuration
+
+Configuration is managed through environment variables.
+
+Example configuration files are provided:
+
+```
+backend/.env.example
+frontend/.env.local.example
+```
+
+---
+
+## Security
+
+Security is a core part of Novidia.
+
+The platform includes:
+
+- Secure authentication
+- Password hashing using Argon2
+- Rate limiting
+- Content Security Policy
+- Abuse protection
+- Privacy-oriented account management
+
+Security implementation details are intentionally omitted from this repository.
+
+---
+
+## Contributing
+
+Contributions are welcome.
+
+1. Fork the repository
+2. Create a feature branch
+
+```bash
+git checkout -b feature/my-feature
+```
+
+3. Commit your changes
+
+```bash
+git commit -m "Add new feature"
+```
+
+4. Push your branch
+
+```bash
+git push origin feature/my-feature
+```
+
+5. Open a Pull Request
+
+---
+
+## Roadmap
+
+- [ ] Rich text editor
+- [ ] Mobile application
+- [ ] Notifications
+- [ ] Federation between schools
+- [ ] Public API
+
+---
+
+## License
+
+This project is proprietary software.
+
+All rights reserved.
+
+---
+
+<div align="center">
+
+Built with ❤️ for Polish education.
+
+**https://novidia.eu**
+
+</div>
