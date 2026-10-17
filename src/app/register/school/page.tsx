@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ImageSide from "../../components/pexels/ImageSide";
 import PasswordInput from "../../components/auth/PasswordInput";
-import { NovButton, NovLink, NovIconButton, NovInput, NovSelect, NovTextarea, NovCheckbox, NovToast, NovToastProgress, NovToastCount, NovToastClose } from "@/app/components/ui";
+import { NovButton, NovLink, NovIconButton, NovInput, NovTextarea, NovCheckbox, NovToast, NovToastProgress, NovToastCount, NovToastClose } from "@/app/components/ui";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import { Check, Mail, ArrowRight, Upload, X, Building2, ChevronDown } from "lucide-react";
 import confetti from "canvas-confetti";
@@ -24,7 +24,7 @@ const VOIVODESHIPS = [
   "świętokrzyskie", "warmińsko-mazurskie", "wielkopolskie", "zachodniopomorskie",
 ];
 
-const COUNTRIES = [
+const DEFAULT_COUNTRIES = [
   { code: "+48", iso: "pl", label: "Polska" },
   { code: "+44", iso: "gb", label: "Wielka Brytania" },
   { code: "+49", iso: "de", label: "Niemcy" },
@@ -131,6 +131,13 @@ export default function SchoolRegisterPage() {
   const [countrySearch, setCountrySearch] = useState("");
   const phoneDropdownRef = useRef<HTMLDivElement>(null);
 
+  const [voivodeshipOpen, setVoivodeshipOpen] = useState(false);
+  const voivodeshipRef = useRef<HTMLDivElement>(null);
+
+  // Country dialing codes are loaded from the RestCountries API; the static
+  // list above is used as an instant/offline fallback.
+  const [countries, setCountries] = useState(DEFAULT_COUNTRIES);
+
   const [tosConsent, setTosConsent] = useState(false);
 
   const [verificationCode, setVerificationCode] = useState("");
@@ -160,9 +167,48 @@ export default function SchoolRegisterPage() {
       if (phoneDropdownRef.current && !phoneDropdownRef.current.contains(event.target as Node)) {
         setPhoneDropdownOpen(false);
       }
+      if (voivodeshipRef.current && !voivodeshipRef.current.contains(event.target as Node)) {
+        setVoivodeshipOpen(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          "https://restcountries.com/v3.1/all?fields=name,cca2,idd,translations",
+        );
+        if (!res.ok) return;
+        const data: any[] = await res.json();
+        const mapped = data
+          .map((c) => {
+            const root: string = c.idd?.root || "";
+            const suffix: string = c.idd?.suffixes?.[0] || "";
+            const iso = String(c.cca2 || "").toLowerCase();
+            if (!root || !iso) return null;
+            const label: string =
+              c.translations?.pol?.common || c.name?.common || iso.toUpperCase();
+            return { code: `${root}${suffix}`, iso, label };
+          })
+          .filter(Boolean) as { code: string; iso: string; label: string }[];
+
+        const seen = new Set<string>();
+        const unique = mapped.filter((c) =>
+          seen.has(c.code) ? false : (seen.add(c.code), true),
+        );
+        unique.sort((a, b) => a.label.localeCompare(b.label, "pl"));
+        if (!cancelled && unique.length > 0) setCountries(unique);
+      } catch {
+        /* keep the static fallback list */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -207,6 +253,8 @@ export default function SchoolRegisterPage() {
     if (!formData.schoolName) newErrors.schoolName = true;
     if (!formData.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) newErrors.email = true;
     if (!formData.password || formData.password.length < 8) newErrors.password = true;
+    if (!formData.rspoNumber) newErrors.rspoNumber = true;
+    if (!formData.phoneNumber) newErrors.phoneNumber = true;
     if (!tosConsent) newErrors.tosConsent = true;
 
     if (Object.keys(newErrors).length > 0) {
@@ -697,8 +745,12 @@ export default function SchoolRegisterPage() {
                               type="email"
                               placeholder="Szkolny adres e-mail *"
                               value={formData.email}
+                              autoCapitalize="none"
+                              autoCorrect="off"
+                              spellCheck={false}
                               onChange={(e) => {
-                                setFormData({ ...formData, email: e.target.value });
+                                const raw = e.target.value.replace(/\s+/g, "");
+                                setFormData({ ...formData, email: raw.includes("@") ? raw.toLowerCase() : raw });
                                 setErrors({ ...errors, email: false });
                               }}
                               error={errors.email}
@@ -744,27 +796,28 @@ export default function SchoolRegisterPage() {
                           >
                             <div className="flex gap-3">
                               <div className="w-1/2 relative" ref={phoneDropdownRef}>
-                                <div className="flex h-14 rounded-xl border border-edge focus-within:ring-2 focus-within:ring-main focus-within:border-transparent">
+                                <div className="flex items-center h-14 w-full overflow-hidden rounded-xl border border-edge focus-within:ring-2 focus-within:ring-main focus-within:border-transparent">
                                   <NovButton
                                     unstyled
                                     type="button"
                                     onClick={() => { setPhoneDropdownOpen(!phoneDropdownOpen); setCountrySearch(""); }}
                                     className="flex items-center gap-1.5 px-3 bg-surface-raised hover:bg-surface-raised transition-colors cursor-pointer shrink-0 border-r border-edge rounded-l-xl"
                                   >
-                                    <img src={`https://flagcdn.com/16x12/${COUNTRIES.find(c => c.code === phoneCountryCode)?.iso}.png`} alt="" className="w-4 h-3 object-cover rounded-[2px]" />
+                                    <img src={`https://flagcdn.com/16x12/${countries.find(c => c.code === phoneCountryCode)?.iso}.png`} alt="" className="w-4 h-3 object-cover rounded-[2px]" />
                                     <span className="text-xs font-semibold text-ink-muted">{phoneCountryCode}</span>
                                     <ChevronDown size={12} className={`text-ink-subtle transition-transform ${phoneDropdownOpen ? "rotate-180" : ""}`} />
                                   </NovButton>
                                   <NovInput
                                     unstyled
                                     type="tel"
-                                    placeholder="Telefon"
+                                    placeholder="Telefon szkoły *"
                                     value={formData.phoneNumber}
                                     onChange={(e) => {
                                       const formatted = formatPhone(e.target.value, phoneCountryCode);
                                       setFormData({ ...formData, phoneNumber: formatted });
+                                      setErrors({ ...errors, phoneNumber: false });
                                     }}
-                                    className="flex-1 min-w-0 px-3 text-center text-sm text-ink placeholder:text-ink-muted focus:outline-none"
+                                    className={`flex-1 min-w-0 h-full bg-transparent px-3 text-center text-sm text-ink placeholder:text-ink-muted focus:outline-none ${errors.phoneNumber ? "ring-2 ring-red-500/40" : ""}`}
                                   />
                                 </div>
                                 {phoneDropdownOpen && (
@@ -780,7 +833,7 @@ export default function SchoolRegisterPage() {
                                       />
                                     </div>
                                     <div className="overflow-y-auto max-h-48">
-                                      {COUNTRIES.filter((c) => c.label.toLowerCase().includes(countrySearch.toLowerCase()) || c.code.includes(countrySearch) || c.iso.includes(countrySearch.toLowerCase())).map((c) => (
+                                      {countries.filter((c) => c.label.toLowerCase().includes(countrySearch.toLowerCase()) || c.code.includes(countrySearch) || c.iso.includes(countrySearch.toLowerCase())).map((c) => (
                                         <NovButton
                                           key={c.code}
                                           unstyled
@@ -797,14 +850,34 @@ export default function SchoolRegisterPage() {
                                   </div>
                                 )}
                               </div>
-                              <div className="w-1/2 relative">
-                                <NovSelect
-                                  value={formData.voivodeship}
-                                  onChange={(e) => setFormData({ ...formData, voivodeship: e.target.value })}
+                              <div className="w-1/2 relative" ref={voivodeshipRef}>
+                                <NovButton
+                                  unstyled
+                                  type="button"
+                                  onClick={() => setVoivodeshipOpen((o) => !o)}
+                                  className="w-full h-14 flex items-center justify-between gap-2 rounded-xl border border-edge bg-transparent px-4 text-sm text-ink hover:border-edge-strong transition-colors cursor-pointer"
                                 >
-                                  <option value="" disabled>Województwo</option>
-                                  {VOIVODESHIPS.map((v) => (<option key={v} value={v}>{v}</option>))}
-                                </NovSelect>
+                                  <span className={formData.voivodeship ? "text-ink capitalize" : "text-ink-muted"}>
+                                    {formData.voivodeship || "Województwo"}
+                                  </span>
+                                  <ChevronDown size={14} className={`text-ink-subtle transition-transform ${voivodeshipOpen ? "rotate-180" : ""}`} />
+                                </NovButton>
+                                {voivodeshipOpen && (
+                                  <div className="absolute top-16 left-0 w-full z-30 max-h-60 overflow-y-auto rounded-xl border border-edge bg-surface shadow-lg p-1">
+                                    {VOIVODESHIPS.map((v) => (
+                                      <NovButton
+                                        key={v}
+                                        unstyled
+                                        type="button"
+                                        onClick={() => { setFormData({ ...formData, voivodeship: v }); setVoivodeshipOpen(false); }}
+                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm text-left capitalize transition-colors cursor-pointer ${formData.voivodeship === v ? "bg-main/10 text-main font-semibold" : "text-ink hover:bg-surface-raised"}`}
+                                      >
+                                        <span>{v}</span>
+                                        {formData.voivodeship === v && <Check size={14} />}
+                                      </NovButton>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             </div>
 
@@ -816,14 +889,14 @@ export default function SchoolRegisterPage() {
                               className="h-14 text-center"
                             />
 
-                            <div className="flex gap-3">
+                            <div className="grid grid-cols-3 gap-3">
                               <NovInput
                                 unstyled
                                 type="text"
                                 placeholder="Adres"
                                 value={formData.address}
                                 onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                                className="w-2/3 h-14 rounded-xl px-4 border border-edge focus:outline-none focus:ring-2 focus:ring-main focus:border-transparent placeholder:text-ink-muted text-ink text-center text-sm"
+                                className="col-span-2 w-full h-14 rounded-xl px-4 border border-edge focus:outline-none focus:ring-2 focus:ring-main focus:border-transparent placeholder:text-ink-muted text-ink text-center text-sm"
                               />
                               <NovInput
                                 unstyled
@@ -831,7 +904,7 @@ export default function SchoolRegisterPage() {
                                 placeholder="Kod poczt."
                                 value={formData.postalCode}
                                 onChange={(e) => setFormData({ ...formData, postalCode: e.target.value })}
-                                className="w-1/3 h-14 rounded-xl px-4 border border-edge focus:outline-none focus:ring-2 focus:ring-main focus:border-transparent placeholder:text-ink-muted text-ink text-center text-sm"
+                                className="col-span-1 w-full h-14 rounded-xl px-4 border border-edge focus:outline-none focus:ring-2 focus:ring-main focus:border-transparent placeholder:text-ink-muted text-ink text-center text-sm"
                               />
                             </div>
 
@@ -849,7 +922,16 @@ export default function SchoolRegisterPage() {
                                 type="button"
                                 variant="main"
                                 size="none"
-                                onClick={() => setRegisterStep(3)}
+                                onClick={() => {
+                                  const newErrors: Record<string, boolean> = {};
+                                  if (!formData.phoneNumber) newErrors.phoneNumber = true;
+                                  if (Object.keys(newErrors).length > 0) {
+                                    setErrors(newErrors);
+                                    showToast("Podaj numer telefonu szkoły.");
+                                    return;
+                                  }
+                                  setRegisterStep(3);
+                                }}
                                 className="w-2/3 h-14 rounded-xl font-semibold text-sm"
                               >
                                 <span>Dalej</span>
@@ -883,10 +965,10 @@ export default function SchoolRegisterPage() {
                               <NovInput
                                 unstyled
                                 type="text"
-                                placeholder="Nr RSPO (opcjonalnie)"
+                                placeholder="Nr RSPO *"
                                 value={formData.rspoNumber}
-                                onChange={(e) => setFormData({ ...formData, rspoNumber: e.target.value })}
-                                className="w-1/2 h-14 rounded-xl px-4 border border-edge focus:outline-none focus:ring-2 focus:ring-main focus:border-transparent placeholder:text-ink-muted text-ink text-center text-sm"
+                                onChange={(e) => { setFormData({ ...formData, rspoNumber: e.target.value }); setErrors({ ...errors, rspoNumber: false }); }}
+                                className={`w-1/2 h-14 rounded-xl px-4 border border-edge focus:outline-none focus:ring-2 focus:ring-main focus:border-transparent placeholder:text-ink-muted text-ink text-center text-sm ${errors.rspoNumber ? "border-2 border-red-500 ring-2 ring-red-500/20" : ""}`}
                               />
                               <NovInput
                                 unstyled

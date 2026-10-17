@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* The app toggles the `.dark` class on <html>; Tailwind's stock `dark:`
+   variant listens to `prefers-color-scheme` instead, so those utilities
+   flipped with the OS and ignored the in-app theme toggler. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 
 :root {
@@ -82,8 +86,25 @@ html.dark :is(.bg-lighter, .bg-medium, .bg-light, .bg-lightest, .bg-superwhite) 
 .bg-app\/70 { background-color: color-mix(in srgb, var(--color-app) 70%, transparent); }
 .bg-app\/60 { background-color: color-mix(in srgb, var(--color-app) 60%, transparent); }
 .bg-ink\/40 { background-color: color-mix(in srgb, var(--color-ink) 40%, transparent); }
+.bg-surface\/85 { background-color: color-mix(in srgb, var(--color-surface) 85%, transparent); }
+.bg-surface\/80 { background-color: color-mix(in srgb, var(--color-surface) 80%, transparent); }
+.bg-surface\/75 { background-color: color-mix(in srgb, var(--color-surface) 75%, transparent); }
 .bg-surface-raised\/80 { background-color: color-mix(in srgb, var(--color-surface-raised) 80%, transparent); }
 .bg-surface-raised\/70 { background-color: color-mix(in srgb, var(--color-surface-raised) 70%, transparent); }
+
+.hover\:bg-app:hover { background-color: var(--color-app); }
+.hover\:bg-surface:hover { background-color: var(--color-surface); }
+.hover\:bg-surface-raised:hover { background-color: var(--color-surface-raised); }
+.hover\:bg-superwhite:hover { background-color: var(--color-superwhite); }
+.hover\:bg-edge-strong:hover { background-color: var(--color-edge-strong); }
+.hover\:text-ink:hover { color: var(--color-ink); }
+.hover\:text-ink-muted:hover { color: var(--color-ink-muted); }
+.hover\:text-ink-subtle:hover { color: var(--color-ink-subtle); }
+.hover\:border-edge:hover { border-color: var(--color-edge); }
+.hover\:border-edge-strong:hover { border-color: var(--color-edge-strong); }
+.hover\:border-main\/30:hover { border-color: color-mix(in srgb, var(--color-main) 30%, transparent); }
+.hover\:border-main\/40:hover { border-color: color-mix(in srgb, var(--color-main) 40%, transparent); }
+.group:hover .group-hover\:border-main\/50 { border-color: color-mix(in srgb, var(--color-main) 50%, transparent); }
 
 /* Brand color opacities (same reasoning as above) */
 .bg-main\/5 { background-color: color-mix(in srgb, var(--color-main) 5%, transparent); }
@@ -91,6 +112,14 @@ html.dark :is(.bg-lighter, .bg-medium, .bg-light, .bg-lightest, .bg-superwhite) 
 .bg-main\/15 { background-color: color-mix(in srgb, var(--color-main) 15%, transparent); }
 .bg-main\/20 { background-color: color-mix(in srgb, var(--color-main) 20%, transparent); }
 .bg-main\/70 { background-color: color-mix(in srgb, var(--color-main) 70%, transparent); }
+.hover\:bg-main\/5:hover { background-color: color-mix(in srgb, var(--color-main) 5%, transparent); }
+.hover\:bg-main\/10:hover { background-color: color-mix(in srgb, var(--color-main) 10%, transparent); }
+.hover\:bg-main\/15:hover { background-color: color-mix(in srgb, var(--color-main) 15%, transparent); }
+.hover\:bg-main\/20:hover { background-color: color-mix(in srgb, var(--color-main) 20%, transparent); }
+.hover\:text-main:hover { color: var(--color-main); }
+.group:hover .group-hover\:text-main { color: var(--color-main); }
+html.dark .hover\:text-main:hover,
+html.dark .group:hover .group-hover\:text-main { color: #ffffff; }
 
 /* Brand ring color for focus rings on custom-color elements. */
 .ring-brand { --tw-ring-color: color-mix(in srgb, var(--color-main) 30%, transparent); }
@@ -140,6 +169,12 @@ p,h1,h2,h3,h4,h5,h6,span,a,li {
 }
 
 .bg-main { background-color: var(--color-main); }
+/* Custom theme: when a two-stop gradient is active, brand fills get the
+   gradient image over the derived base colour. */
+html.accent-gradient .bg-main,
+html.accent-gradient.bg-main {
+  background-image: var(--color-brand-gradient, none);
+}
 .bg-lighter { background-color: var(--color-lighter); }
 .bg-medium { background-color: var(--color-medium); }
 .bg-light { background-color: var(--color-light); }
@@ -167,6 +202,10 @@ body.settings-open {
   overflow: hidden;
 }
 
+body.mega-menu-open {
+  overflow: hidden;
+}
+
 body.settings-open #main-content-wrapper {
   transform: scale(0.975);
   filter: blur(10px) brightness(0.65);
@@ -177,4 +216,90 @@ body.settings-open #main-content-wrapper {
   transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), filter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
   transform-origin: center center;
 }
+
+.sheet-max-h { max-height: 85vh; }
+
+@supports (max-height: 1dvh) {
+  .sheet-max-h { max-height: 85dvh; }
+}
+
+/* ── Animated theme toggler (MagicUI) ─────────────────────────────────────
+   Scoped to AnimatedThemeToggler — the toggler sets the data-attribute only
+   during a theme toggle, so other view transitions (e.g. Next.js navigation)
+   keep their default cross-fade. During a toggle the cross-fade must be off so
+   only the circular reveal plays. */
+html[data-magicui-theme-vt="active"]::view-transition-old(root),
+html[data-magicui-theme-vt="active"]::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* The new snapshot has to be clipped from the very first frame. The JS
+   animation only starts once `transition.ready` resolves, so without this the
+   already-flipped (new) snapshot flashed in unclipped and then got clipped back
+   to zero — a light→dark→light→dark blink on every toggle. The toggler writes
+   --magicui-theme-vt-clip-from before startViewTransition(); the WAAPI
+   animation takes over the same property as soon as it starts. */
+html[data-magicui-theme-vt="active"]::view-transition-new(root) {
+  clip-path: var(--magicui-theme-vt-clip-from, none);
+}
+
+html[data-magicui-theme-vt="active"]::view-transition-group(root) {
+  animation-duration: var(--magicui-theme-toggle-vt-duration);
+}
+
+/* Global "disable animations" preference. JS-driven animations read the same
+   setting through useAnimations(), but this also neutralizes CSS/DOM
+   animations and transitions so nothing moves. */
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ── Smooth accent & theme color fading ────────────────────────────────── */
+.theme-fade,
+.accent-preview,
+.bg-main,
+.text-main,
+.border-main {
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, background 200ms ease;
+}
+
+/* ── Global RTL mirroring support ──────────────────────────────────────── */
+[dir="rtl"] {
+  text-align: right;
+  direction: rtl;
+}
+
+[dir="rtl"] .text-left {
+  text-align: right !important;
+}
+
+[dir="rtl"] .text-right {
+  text-align: left !important;
+}
+
+/* Invert directional icons in RTL */
+[dir="rtl"] .lucide-chevron-right,
+[dir="rtl"] .lucide-chevron-left,
+[dir="rtl"] .lucide-arrow-right,
+[dir="rtl"] .lucide-arrow-left,
+[dir="rtl"] .rtl-mirror {
+  transform: scaleX(-1);
+}
+
+[dir="rtl"] .ml-auto {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+[dir="rtl"] .mr-auto {
+  margin-right: 0;
+  margin-left: auto;
+}
+
 

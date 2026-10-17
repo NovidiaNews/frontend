@@ -3,11 +3,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import UserBadge from "@/app/components/UserBadge";
 import {
   AlertTriangle,
   AtSign,
   Bell,
+  Cake,
   Camera,
   Check,
   ChevronDown,
@@ -34,6 +34,7 @@ import {
   Monitor,
   Moon,
   Palette,
+  Droplet,
   Power,
   ScrollText,
   Shield,
@@ -57,9 +58,22 @@ import {
   NovInput,
   NovSwitch,
   NovTextarea,
+  AnimatedThemeToggler,
 } from "@/app/components/ui";
 import { useTheme } from "@/lib/useTheme";
 import type { ThemePreference } from "@/lib/useTheme";
+import { useAnimations } from "@/lib/useAnimations";
+import {
+  applyAccent,
+  getStoredAccent,
+  DEFAULT_ACCENT,
+  parseAccentSpec,
+  isAccentEnabled,
+  isAccentPending,
+  setAccentEnabled,
+  setAccentPending,
+} from "@/lib/accent";
+import { ColorPicker } from "@/app/components/ui";
 import { useI18n } from "@/lib/i18n";
 import { LANGUAGES, flagUrl } from "@/lib/translations";
 import { cdnUrl } from "@/lib/cdn";
@@ -68,7 +82,7 @@ import { cdnUrl } from "@/lib/cdn";
 // Config
 // ---------------------------------------------------------------------------
 
-const API_URL = "/api";
+import { API_URL } from "@/lib/api";
 
 const KNOWN_PROVIDERS = ["google", "discord", "facebook", "apple"];
 
@@ -103,6 +117,7 @@ type SubSectionId =
   | "privacy-consent"
   | "linked-accounts"
   | "appearance-theme"
+  | "appearance-accent"
   | "appearance-language"
   | "danger-account";
 
@@ -119,65 +134,63 @@ interface CategoryConfig {
   subs: SectionConfig[];
 }
 
+import { resetClientStateToDefaults } from "@/lib/auth";
+
 const CATEGORIES: CategoryConfig[] = [
   {
     id: "profile",
-    label: "Profil",
+    label: "settings.category.profile",
     icon: User,
     subs: [
-      { id: "profile-picture", label: "Zdjęcie profilowe", icon: Camera },
-      { id: "profile-background", label: "Tło profilu", icon: ImagePlus },
-      { id: "profile-details", label: "Szczegóły profilu", icon: Sparkles },
-      { id: "profile-socials", label: "Social media", icon: AtSign },
-      { id: "profile-basic", label: "Podstawowe dane", icon: UserRound },
-      { id: "profile-preview", label: "Podgląd profilu", icon: Eye },
+      { id: "profile-basic", label: "settings.section.basic", icon: UserRound },
+      { id: "profile-picture", label: "settings.section.picture", icon: Camera },
+      { id: "profile-background", label: "settings.section.background", icon: ImagePlus },
+      { id: "profile-details", label: "settings.section.details", icon: Sparkles },
+      { id: "profile-socials", label: "settings.section.socials", icon: AtSign },
+      { id: "profile-preview", label: "settings.section.preview", icon: Eye },
     ],
   },
   {
     id: "account",
-    label: "Konto",
-    icon: UserCog,
+    label: "settings.category.account",
+    icon: Shield,
     subs: [
-      { id: "account-email", label: "Adres e-mail", icon: Mail },
-      { id: "account-password", label: "Zmiana hasła", icon: KeyRound },
-      { id: "account-devices", label: "Zalogowane urządzenia", icon: Monitor },
+      { id: "account-email", label: "settings.section.email", icon: Mail },
+      { id: "account-password", label: "settings.section.password", icon: KeyRound },
+      { id: "account-devices", label: "settings.account.devices", icon: Monitor },
+      { id: "linked-accounts", label: "settings.section.linkedAccounts", icon: Link2 },
+    ],
+  },
+  {
+    id: "appearance",
+    label: "settings.category.appearance",
+    icon: Palette,
+    subs: [
+      { id: "appearance-theme", label: "settings.section.theme", icon: Palette },
+      { id: "appearance-accent", label: "settings.section.accent", icon: Droplet },
+      { id: "appearance-language", label: "settings.section.language", icon: Globe },
     ],
   },
   {
     id: "notifications",
-    label: "Powiadomienia",
+    label: "settings.category.notifications",
     icon: Bell,
-    subs: [{ id: "notifications-main", label: "Powiadomienia", icon: Bell }],
+    subs: [{ id: "notifications-main", label: "settings.section.notifications", icon: Bell }],
   },
   {
     id: "privacy",
-    label: "Prywatność",
-    icon: Shield,
+    label: "settings.category.privacy",
+    icon: FileText,
     subs: [
-      { id: "privacy-export", label: "Twoje dane (RODO)", icon: FileText },
-      { id: "privacy-consent", label: "Zgody i regulamin", icon: ScrollText },
-    ],
-  },
-  {
-    id: "linked",
-    label: "Połączone konta",
-    icon: Link2,
-    subs: [{ id: "linked-accounts", label: "Połączone konta", icon: Link2 }],
-  },
-  {
-    id: "appearance",
-    label: "Wygląd",
-    icon: Palette,
-    subs: [
-      { id: "appearance-theme", label: "Motyw", icon: Palette },
-      { id: "appearance-language", label: "Język", icon: Globe },
+      { id: "privacy-consent", label: "settings.section.consent", icon: ScrollText },
+      { id: "privacy-export", label: "settings.section.export", icon: FileText },
     ],
   },
   {
     id: "danger",
-    label: "Strefa zagrożenia",
+    label: "settings.category.danger",
     icon: AlertTriangle,
-    subs: [{ id: "danger-account", label: "Konto", icon: AlertTriangle }],
+    subs: [{ id: "danger-account", label: "settings.section.dangerAccount", icon: AlertTriangle }],
   },
 ];
 
@@ -193,6 +206,9 @@ function normalizeTab(raw: string | null): SubSectionId | null {
   if (raw === "linked") return "linked-accounts";
   if (raw === "notifications") return "notifications-main";
   if (raw === "profile") return "profile-basic";
+  if (raw === "privacy") return "privacy-consent";
+  if (raw === "account") return "profile-basic";
+  if (raw === "danger") return "danger-account";
   if (raw === "security") return "account-email";
   if (raw === "account-disable" || raw === "danger-disable" || raw === "danger-delete") return "danger-account";
   if (raw && (ALL_SECTION_IDS as string[]).includes(raw)) return raw as SubSectionId;
@@ -261,6 +277,11 @@ interface NovidiaUser {
   isDisabled?: boolean;
   disabledAt?: string;
   consentToTOS?: boolean;
+  ageGroup?: string;
+  birthDate?: string | null;
+  birthDayMonthPublic?: boolean;
+  isRestricted?: boolean;
+  guardianEmail?: string | null;
   isOnboarded?: boolean;
   isVerified?: boolean;
   role?: number;
@@ -279,8 +300,15 @@ interface LinkedAccountRow {
   available: boolean;
 }
 
-function getSectionLabel(id: SubSectionId): string {
-  return getSection(id)?.label ?? id;
+function getSectionLabel(id: SubSectionId, translate: (k: string) => string = (k) => k): string {
+  return translate(getSection(id)?.label ?? id);
+}
+
+function ageGroupLabel(group?: string): string {
+  if (!group) return "—";
+  if (group === "under13") return "poniżej 13 lat";
+  if (group === "75+") return "75+";
+  return `${group} lat`;
 }
 
 function getPasswordStrength(password: string): { label: string; score: number; color: string } {
@@ -618,6 +646,7 @@ function SidebarSubButton({
   onClick: () => void;
 }) {
   const Icon = sub.icon;
+  const { t } = useI18n();
   return (
     <NovButton
       unstyled
@@ -632,7 +661,7 @@ function SidebarSubButton({
       }`}
     >
       <Icon size={14} className={`shrink-0 ${active ? "text-main" : "text-ink-subtle"}`} />
-      <span className="text-xs font-semibold truncate">{sub.label}</span>
+      <span className="text-xs font-semibold truncate">{t(sub.label)}</span>
     </NovButton>
   );
 }function ToastStack({ toasts }: { toasts: Toast[] }) {
@@ -991,10 +1020,10 @@ function SocialFieldIcon({ name, size = 11 }: { name: string; size?: number }) {
   return null;
 }
 
-function themeLabel(pref: ThemePreference): string {
-  if (pref === "light") return "Jasny";
-  if (pref === "dark") return "Ciemny";
-  return "Zgodny z systemem";
+function themeLabelKey(pref: ThemePreference): string {
+  if (pref === "light") return "settings.theme.light";
+  if (pref === "dark") return "settings.theme.dark";
+  return "settings.theme.system";
 }
 
 // ---------------------------------------------------------------------------
@@ -1222,7 +1251,7 @@ function LanguageSection() {
         title={t("settings.appearance.language")}
         icon={<Globe size={15} className="text-main shrink-0" />}
         description={t("settings.appearance.languageDesc")}
-        badge="alpha"
+        badge="beta"
       />
       <div className="px-5 py-5">
         <div ref={ref} className="relative z-10">
@@ -1231,8 +1260,8 @@ function LanguageSection() {
             onClick={() => setOpen(!open)}
             className="w-full flex items-center gap-3 bg-surface-raised border border-edge rounded-xl px-4 py-3 text-sm font-medium text-ink hover:border-edge-strong transition-colors cursor-pointer"
           >
-            <img src={flagUrl(current.countryCode)} alt={current.label} className="w-6 h-[18px] rounded-sm object-cover shadow-sm" />
-            <span className="flex-1 text-left">{current.label}</span>
+            <img src={flagUrl(current.countryCode)} alt={current.label} className="w-6 h-[18px] rounded-sm object-cover shadow-sm shrink-0" />
+            <span className="flex-1 text-start">{current.label}</span>
             <ChevronDown size={16} className={`text-ink-subtle transition-transform ${open ? "rotate-180" : ""}`} />
           </button>
 
@@ -1267,13 +1296,13 @@ function LanguageSection() {
                       }}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                         l.code === locale
-                          ? "bg-main/10 text-main"
+                          ? "bg-main/10 text-main font-bold"
                           : "text-ink hover:bg-surface-raised"
                       }`}
                     >
-                      <img src={flagUrl(l.countryCode)} alt={l.label} className="w-6 h-[18px] rounded-sm object-cover shadow-sm" />
-                      <span>{l.label}</span>
-                      {l.code === locale && <Check size={14} className="ml-auto text-main" />}
+                      <img src={flagUrl(l.countryCode)} alt={l.label} className="w-6 h-[18px] rounded-sm object-cover shadow-sm shrink-0" />
+                      <span className="text-start">{l.label}</span>
+                      {l.code === locale && <Check size={14} className="ms-auto text-main" />}
                     </button>
                   ))}
                   {filtered.length === 0 && (
@@ -1298,6 +1327,16 @@ export default function SettingsModal() {
   const router = useRouter();
   const pathname = usePathname();
   const { theme: themePref, setTheme, resolvedTheme } = useTheme();
+  const [accent, setAccent] = useState<string>(() => getStoredAccent() ?? DEFAULT_ACCENT);
+  const [accentEnabled, setAccentEnabledState] = useState<boolean>(() => isAccentEnabled());
+  // Local-preview → account-save flow for the custom theme colour.
+  const [pendingAccent, setPendingAccent] = useState<string | null | undefined>(() =>
+    typeof window !== "undefined" && isAccentPending() ? getStoredAccent() : undefined,
+  );
+  const [lastSyncedAccent, setLastSyncedAccent] = useState<string | null | undefined>(undefined);
+  const [accentSaving, setAccentSaving] = useState(false);
+  // Bump to recompute accentDirty after a local edit or save.
+  const { animationsEnabled, setAnimationsEnabled } = useAnimations();
   const { t } = useI18n();
 
   const isOpen = searchParams.get("settings") === "true";
@@ -1305,7 +1344,7 @@ export default function SettingsModal() {
   const [activeSection, setActiveSection] = useState<SubSectionId>("profile-basic");
   const [pendingNav, setPendingNav] = useState<SubSectionId | "close" | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [expandedCats, setExpandedCats] = useState<Set<string>>(() => new Set(["profile"]));
+  const [expandedCats, setExpandedCats] = useState<Set<string>>(() => new Set(CATEGORIES.map((c) => c.id)));
 
   const [user, setUser] = useState<NovidiaUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -1322,6 +1361,7 @@ export default function SettingsModal() {
   const [savingSectionId, setSavingSectionId] = useState<SubSectionId | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [disableDialogOpen, setDisableDialogOpen] = useState(false);
+  const [birthdayConfirmOpen, setBirthdayConfirmOpen] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteEmail, setDeleteEmail] = useState("");
@@ -1468,7 +1508,7 @@ export default function SettingsModal() {
     const initialSection = tabId ?? "profile-basic";
     setActiveSection(initialSection);
     const initialCat = CATEGORIES.find((c) => c.subs.some((s) => s.id === initialSection));
-    setExpandedCats(initialCat ? new Set([initialCat.id]) : new Set(["profile"]));
+    setExpandedCats(initialCat ? new Set([initialCat.id]) : new Set(["account"]));
 
     setBasicErrors({});
     setEmailErrors({});
@@ -1482,6 +1522,10 @@ export default function SettingsModal() {
     setIsInitializing(false);
 
     if (storedUser) {
+      // A preference edited while this request is in flight is newer than the
+      // reply — without this a fast accent change snapped back as soon as
+      // /users/me landed.
+      const accentAtStart = localStorage.getItem("novidia-accent");
       fetch(`${API_URL}/users/me`, {
         credentials: "include",
       })
@@ -1491,10 +1535,41 @@ export default function SettingsModal() {
         })
         .then((fresh: NovidiaUser) => {
           if (!fresh || !fresh.id) return;
+          // This request only exists to refresh profile/form data. Preference
+          // sync belongs to AccentSync — letting a reply that predates a local
+          // edit write it back into the cache re-armed AccentSync to flip the
+          // page (and the accent) back to the server's older value.
+          const themeNow = localStorage.getItem("novidia-theme");
+          if (themeNow) fresh.theme = themeNow;
+          const accentNow = localStorage.getItem("novidia-accent");
+          if (accentAtStart !== accentNow && !isAccentPending()) {
+            fresh.accentColor = accentNow;
+          }
           localStorage.setItem("novidia_user", JSON.stringify(fresh));
           setUser(fresh);
           setForm(buildFormFromUser(fresh));
           setNotificationsEnabled(fresh.notificationsEnabled !== false);
+          const serverAccent =
+            typeof fresh.accentColor === "string"
+              ? (parseAccentSpec(fresh.accentColor)?.join(",") ?? null)
+              : null;
+          setLastSyncedAccent(serverAccent);
+          // Reconcile the cached palette with the account. The "default"
+          // accent is stored as "no custom theme", so compare like storeAccent
+          // does. An unsaved local preview (pending) always wins.
+          const localAccent = getStoredAccent();
+          const accountAccent =
+            serverAccent === DEFAULT_ACCENT.toUpperCase() ? null : serverAccent;
+          if (isAccentPending()) {
+            if (localAccent === accountAccent) {
+              setAccentPending(false);
+              setPendingAccent(undefined);
+            }
+          } else if (localAccent !== accountAccent) {
+            // Account wins — keep the picker and the document in step.
+            applyAccent(serverAccent);
+            setAccent(serverAccent ?? DEFAULT_ACCENT);
+          }
         })
         .catch(() => {});
     }
@@ -1734,12 +1809,26 @@ export default function SettingsModal() {
   };
 
   const applyUserUpdate = (extra: Partial<NovidiaUser>) => {
-    setUser((prev) => {
-      if (!prev) return prev;
-      const merged: NovidiaUser = { ...prev, ...extra };
-      localStorage.setItem("novidia_user", JSON.stringify(merged));
-      return merged;
-    });
+    // The cached profile must be on disk *before* novidia_auth_change fires:
+    // AccentSync reads localStorage synchronously in that handler, and doing
+    // the write inside the setState updater left it a render too late — it then
+    // saw the previous theme/accent and pushed it back onto the page.
+    let base: NovidiaUser | null = null;
+    try {
+      base = JSON.parse(localStorage.getItem("novidia_user") || "null") as NovidiaUser | null;
+    } catch {
+      base = null;
+    }
+    if (!base) base = user;
+    if (base) {
+      const merged: NovidiaUser = { ...base, ...extra };
+      try {
+        localStorage.setItem("novidia_user", JSON.stringify(merged));
+      } catch {
+        /* storage unavailable — the in-memory copy still updates */
+      }
+      setUser(merged);
+    }
     window.dispatchEvent(new Event("novidia_auth_change"));
   };
 
@@ -2009,8 +2098,7 @@ export default function SettingsModal() {
   };
 
   const handleSignOut = () => {
-    localStorage.removeItem("novidia_user");
-    window.dispatchEvent(new Event("novidia_auth_change"));
+    resetClientStateToDefaults();
     closeSettings();
     router.push("/");
   };
@@ -2109,6 +2197,90 @@ export default function SettingsModal() {
   // -------------------------------------------------------------------------
   // Appearance
   // -------------------------------------------------------------------------
+
+  // ── Birthday privacy ──────────────────────────────────────────────────
+  const handleToggleBirthdayPublic = async (next: boolean) => {
+    if (!user) return;
+    if (next) {
+      // Showing day + month requires an explicit fullscreen confirmation.
+      setBirthdayConfirmOpen(true);
+      return;
+    }
+    try {
+      const updated = await patchUser({ birthDayMonthPublic: false });
+      applyUserUpdate(updated);
+      triggerToast("success", "Dzień i miesiąc urodzin są teraz prywatne.");
+    } catch (err) {
+      triggerToast("error", err instanceof Error ? err.message : "Nie udało się zapisać.");
+    }
+  };
+
+  const confirmBirthdayPublic = async () => {
+    setBirthdayConfirmOpen(false);
+    try {
+      const updated = await patchUser({ birthDayMonthPublic: true });
+      applyUserUpdate(updated);
+      triggerToast("success", "Dzień i miesiąc urodzin są teraz publiczne.");
+    } catch (err) {
+      triggerToast("error", err instanceof Error ? err.message : "Nie udało się zapisać.");
+    }
+  };
+
+  // ── Custom interface theme colour (Discord-style, free for everyone) ────
+  // Edits are applied as a local preview instantly; nothing is written to
+  // the account until "Zapisz zmiany" is pressed (single request, one toast).
+  // `accent` holds the spec: `#hex` or `#hex,#hex` (gradient stops).
+  const accentStops = parseAccentSpec(accent) ?? [DEFAULT_ACCENT];
+  const isGradientAccent = accentStops.length > 1;
+  const accentDirty = pendingAccent !== undefined && pendingAccent !== lastSyncedAccent;
+
+  const flushAccentSave = async () => {
+    const next = pendingAccent;
+    setPendingAccent(undefined);
+    if (next === undefined || next === lastSyncedAccent) {
+      // Nothing left to persist — never leave the "unsaved preview" flag set,
+      // it permanently mutes AccentSync for the rest of the session.
+      setAccentPending(false);
+      return;
+    }
+    if (!user) return;
+    setAccentSaving(true);
+    try {
+      const updated = await patchUser({ accentColor: next });
+      // Force the just-saved value into the cached profile: the PATCH response
+      // is merged over the previous copy, so a response missing accentColor
+      // would keep the old value and AccentSync would push the old gradient
+      // back onto every brand button on the next auth event.
+      applyUserUpdate({ ...updated, accentColor: next });
+      setLastSyncedAccent(next);
+      setAccentPending(false);
+      triggerToast("success", t("toast.accentSaved"));
+    } catch (err) {
+      // Keep the edit pending so "Zapisz zmiany" stays enabled for a retry.
+      setPendingAccent(next);
+      triggerToast(
+        "error",
+        err instanceof Error ? err.message : t("toast.accentLocal"),
+      );
+    } finally {
+      setAccentSaving(false);
+    }
+  };
+
+  /** Local preview only — persistence happens in flushAccentSave(). */
+  const handleSelectAccent = (spec: string | null) => {
+    const colors = parseAccentSpec(spec);
+    const next = colors ? colors.join(",") : DEFAULT_ACCENT;
+    setAccent(next);
+    applyAccent(colors ? next : null);
+    // What would actually be sent to the account for this preview.
+    const savable = colors ? next : null;
+    // Nothing to save when the preview already matches the account — flagging
+    // it as pending would mute AccentSync for the rest of the session.
+    const needsSave = savable !== lastSyncedAccent;
+    setPendingAccent(needsSave ? savable : undefined);
+    setAccentPending(needsSave);
+  };
 
   const handleSelectTheme = async (next: ThemePreference) => {
     if (next === themePref) return;
@@ -2865,6 +3037,7 @@ export default function SettingsModal() {
 
       case "privacy-consent":
         return (
+          <>
           <Card>
             <CardHeader
               title="Zgody i regulamin"
@@ -2888,6 +3061,42 @@ export default function SettingsModal() {
                   </span>
                 )}
               </div>
+              <div className="flex items-center justify-between gap-3 py-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Cake size={15} className="text-ink-subtle shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-ink">{t("settings.privacy.birthday")}</p>
+                    <p className="text-[10px] text-ink-subtle font-medium">
+                      {t("settings.privacy.ageGroup")}: {ageGroupLabel(user?.ageGroup)}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold text-emerald-600 shrink-0 flex items-center gap-1">
+                  <LockKeyhole size={12} /> Prywatna
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3 py-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Cake size={15} className="text-ink-subtle shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-ink">{t("settings.privacy.showDayMonth")}</p>
+                    <p className="text-[10px] text-ink-subtle font-medium">{t("settings.privacy.showDayMonthDesc")}</p>
+                  </div>
+                </div>
+                <NovSwitch
+                  checked={!!user?.birthDayMonthPublic}
+                  disabled={!!user?.isRestricted}
+                  onChange={(next) => handleToggleBirthdayPublic(next)}
+                />
+              </div>
+              {user?.isRestricted && (
+                <div className="flex items-center justify-between gap-3 py-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Shield size={15} className="text-amber-600 shrink-0" />
+                    <p className="text-xs font-semibold text-ink">{t("settings.privacy.restricted")}</p>
+                  </div>
+                </div>
+              )}
               <div className="flex items-center justify-between gap-3 py-3">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <Database size={15} className="text-ink-subtle shrink-0" />
@@ -2919,7 +3128,39 @@ export default function SettingsModal() {
               </div>
             </div>
           </Card>
-        );case "linked-accounts":
+
+          {birthdayConfirmOpen && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ type: "spring", stiffness: 320, damping: 26 }}
+                className="w-full max-w-md rounded-2xl border border-edge bg-surface p-6 shadow-2xl"
+              >
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-500/10 text-amber-600">
+                  <Cake size={26} />
+                </div>
+                <h3 className="text-lg font-bold text-ink text-center font-fraunces">
+                  {t("settings.privacy.birthdayConfirmTitle")}
+                </h3>
+                <p className="mt-2 text-xs text-ink-muted text-center font-medium leading-relaxed">
+                  {t("settings.privacy.birthdayConfirmDesc")}
+                </p>
+                <div className="mt-6 flex flex-col gap-2">
+                  <NovButton type="button" variant="main" size="xl" fullWidth onClick={confirmBirthdayPublic}>
+                    {t("settings.privacy.birthdayConfirmYes")}
+                  </NovButton>
+                  <NovButton type="button" variant="outline" size="xl" fullWidth onClick={() => setBirthdayConfirmOpen(false)}>
+                    {t("settings.cancel")}
+                  </NovButton>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </>
+        );
+
+      case "linked-accounts":
         return (
           <Card>
             <CardHeader
@@ -3000,27 +3241,27 @@ export default function SettingsModal() {
         return (
           <Card>
             <CardHeader
-              title="Motyw"
+              title={t("settings.theme.title")}
               icon={<Palette size={15} className="text-main shrink-0" />}
-              description="Wybierz wygląd interfejsu Novidia."
+              description={t("settings.theme.desc")}
               badge="alpha"
             />
             <div className="px-5 py-5">
               <div className="grid grid-cols-3 gap-3">
                 {(
                   [
-                    { id: "light", label: "Jasny", icon: Sun, caption: "Klasyczny, jasny interfejs" },
-                    { id: "dark", label: "Ciemny", icon: Moon, caption: "Ciemny interfejs" },
-                    { id: "system", label: "Zgodny z systemem", icon: Monitor, caption: "Dopasowuje się automatycznie" },
+                    { id: "light", label: t("settings.theme.light"), icon: Sun, caption: t("settings.theme.lightCaption") },
+                    { id: "dark", label: t("settings.theme.dark"), icon: Moon, caption: t("settings.theme.darkCaption") },
+                    { id: "system", label: t("settings.theme.system"), icon: Monitor, caption: t("settings.theme.systemCaption") },
                   ] as { id: ThemePreference; label: string; icon: LucideIcon; caption: string }[]
-                ).map((t) => {
-                  const active = themePref === t.id;
-                  const Icon = t.icon;
+                ).map((tOpt) => {
+                  const active = themePref === tOpt.id;
+                  const Icon = tOpt.icon;
                   return (
                     <button
-                      key={t.id}
+                      key={tOpt.id}
                       type="button"
-                      onClick={() => handleSelectTheme(t.id)}
+                      onClick={() => handleSelectTheme(tOpt.id)}
                       aria-pressed={active}
                       className={`flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-center cursor-pointer transition-all ${
 active
@@ -3029,18 +3270,134 @@ active
                       }`}
                     >
                       <Icon size={20} />
-                      <span className="text-xs font-bold">{t.label}</span>
-                      <span className="text-[10px] font-medium opacity-70">{t.caption}</span>
+                      <span className="text-xs font-bold">{tOpt.label}</span>
+                      <span className="text-[10px] font-medium opacity-70">{tOpt.caption}</span>
                       {active && <Check size={14} className="text-main" />}
                     </button>
                   );
                 })}
               </div>
+
+              {/* MagicUI animated switcher — visible effect, respects "disable animations" */}
+              <div className="mt-5 flex items-center justify-between gap-4 rounded-xl border border-edge bg-surface-raised px-4 py-4">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-ink">{t("settings.appearance.themeQuick")}</p>
+                  <p className="text-[10px] text-ink-subtle font-medium mt-0.5">
+                    {t("settings.appearance.themeQuickDesc")}
+                  </p>
+                </div>
+                <AnimatedThemeToggler
+                  theme={resolvedTheme}
+                  onThemeChange={(next) => handleSelectTheme(next)}
+                  disableTransition={!animationsEnabled}
+                  variant="circle"
+                  className="h-10 w-10 shrink-0 rounded-xl border border-edge bg-surface text-ink hover:border-edge-strong hover:text-main transition-colors cursor-pointer flex items-center justify-center [&_svg]:h-5 [&_svg]:w-5"
+                />
+              </div>
+
+              {/* Darker surface so the accessibility toggle reads as distinct */}
+              <div
+                className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-edge px-4 py-4 bg-surface-raised"
+              >
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-ink">{t("settings.appearance.disableAnimations")}</p>
+                  <p className="text-[10px] text-ink-muted font-medium mt-0.5">
+                    {t("settings.appearance.disableAnimationsDesc")}
+                  </p>
+                </div>
+                <NovSwitch
+                  checked={!animationsEnabled}
+                  onChange={(disabled) => setAnimationsEnabled(!disabled)}
+                />
+              </div>
+
               <p className="text-[10px] text-ink-subtle font-medium mt-3">
-                Aktualnie: {themeLabel(themePref)}
-                {themePref === "system" && ` (${resolvedTheme === "dark" ? "ciemny" : "jasny"})`}. Motyw
-                jest zapisywany na Twoim koncie.
+                {t("settings.theme.current")}: {t(themeLabelKey(themePref))}
+                {themePref === "system" && ` (${resolvedTheme === "dark" ? t("settings.theme.currentDark") : t("settings.theme.currentLight")})`}
+                {t("settings.theme.hint")}
               </p>
+            </div>
+          </Card>
+        );
+
+      case "appearance-accent":
+        return (
+          <Card clip={false}>
+            <CardHeader
+              title={t("settings.accent.title")}
+              icon={<Droplet size={15} className="text-main shrink-0" />}
+              description={t("settings.accent.desc")}
+              action={
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-ink-muted">
+                    {accentEnabled ? t("settings.accent.on") : t("settings.accent.off")}
+                  </span>
+                  <NovSwitch
+                    checked={accentEnabled}
+                    onChange={(next) => {
+                      setAccentEnabledState(next);
+                      setAccentEnabled(next); // applies / clears instantly
+                    }}
+                  />
+                </div>
+              }
+            />
+            <div className="px-5 py-5 space-y-4">
+              {!accentEnabled ? (
+                <p className="text-xs text-ink-subtle font-medium">
+                  {t("settings.accent.disabledHint")}
+                </p>
+              ) : (
+                <>
+                  {/* Live preview strip */}
+                  <div
+                    className="h-12 rounded-xl border border-edge shadow-inner transition-all"
+                    aria-label={t("settings.accent.previewLabel")}
+                    style={{
+                      background: isGradientAccent
+                        ? `linear-gradient(135deg, ${accentStops.join(", ")})`
+                        : accentStops[0],
+                    }}
+                  />
+
+                  {/* Gradient / Color Editor Dropdown */}
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-bold text-ink-subtle">
+                      {t("settings.accent.pickerLabel")}
+                    </p>
+                    <ColorPicker
+                      value={accent}
+                      onChange={(next) => handleSelectAccent(next)}
+                      label={t("settings.accent.pickerLabel")}
+                      ariaLabelHex={t("settings.accent.hexLabel")}
+                    />
+                  </div>
+
+                  <p className="text-[10px] text-ink-subtle font-medium">
+                    {t("settings.accent.hint")}{" "}
+                    <span className="font-mono font-bold">#36316A</span>.
+                  </p>
+
+                  {/* Explicit save — preview stays local until pressed */}
+                  <div className="flex justify-end pt-1 border-t border-edge">
+                    <NovButton
+                      type="button"
+                      variant="main"
+                      size="none"
+                      onClick={() => void flushAccentSave()}
+                      disabled={!accentDirty || accentSaving}
+                      className="px-5 py-2.5 rounded-xl text-xs font-bold text-white shadow-xs cursor-pointer"
+                    >
+                      {accentSaving ? (
+                        <Loader2 size={13} className="animate-spin mr-1.5" />
+                      ) : (
+                        <Check size={13} className="mr-1.5" />
+                      )}
+                      {t("settings.saveChanges")}
+                    </NovButton>
+                  </div>
+                </>
+              )}
             </div>
           </Card>
         );
@@ -3179,7 +3536,7 @@ active
                   <div className="relative z-10 min-w-0">
                     <p className="text-sm font-bold text-ink truncate flex items-center gap-1.5">
                       {`${user.firstName || ""} ${user.lastName || ""}`.trim() || user.username}
-                      <UserBadge role={user.role} isVerified={user.isVerified} size={14} />
+
                     </p>
                     <p className="text-[11px] text-ink-muted font-semibold truncate">@{user.username}</p>
                   </div>
@@ -3206,7 +3563,7 @@ active
                           className={`shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`}
                         />
                         <Icon size={15} className={`shrink-0 ${catActive ? "text-main" : "text-ink-subtle"}`} />
-                        <span className="text-xs font-bold truncate">{cat.label}</span>
+                        <span className="text-xs font-bold truncate">{t(cat.label)}</span>
                       </button>
                       {expanded && (
                         <div className="ml-1 mt-0.5 space-y-0.5 border-l border-edge">
@@ -3249,7 +3606,7 @@ active
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-ink truncate flex items-center gap-1.5">
                       {`${user.firstName || ""} ${user.lastName || ""}`.trim() || user.username}
-                      <UserBadge role={user.role} isVerified={user.isVerified} size={14} />
+
                     </p>
                   </div>
                   <NovButton
@@ -3282,7 +3639,7 @@ active
                       }`}
                     >
                       <Icon size={13} />
-                      {sub.label}
+                      {t(sub.label)}
                     </NovButton>
                   );
                 })}
@@ -3307,7 +3664,7 @@ active
                       <section key={sub.id} id={sub.id} className="scroll-mt-4">
                         <div className="mb-4">
                           <h2 className="text-ink text-lg sm:text-xl font-fraunces font-bold tracking-tight">
-                            {sub.label}
+                            {t(sub.label)}
                           </h2>
                         </div>
                         {renderSectionBody(sub)}

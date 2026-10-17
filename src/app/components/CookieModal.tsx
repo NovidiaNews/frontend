@@ -130,7 +130,7 @@ export default function CookieModal() {
           </div>
 
           <p className={"text-sm text-ink-muted font-medium leading-relaxed text-center"}>
-            Ta strona używa niezbędnych plików cookies do uwierzytelniania i zapisywania motywu. Korzystamy również z opcjonalnych statystyk (Google Analytics oraz własne statystyki odwiedzin), aby ulepszać naszą witrynę.
+            Ta strona używa niezbędnych plików cookies do uwierzytelniania i zapisywania motywu. Za zgodą zbieramy również opcjonalne statystyki: Google Analytics, własne statystyki odwiedzin oraz profil urządzenia (rozdzielczość ekranu, zainstalowane czcionki, agent użytkownika, karta graficzna i inne — pełna lista w Polityce prywatności).
           </p>
 
           <AnimatePresence>
@@ -161,7 +161,7 @@ export default function CookieModal() {
                     />
                   </div>
                   <p className={"text-[10px] text-ink-muted leading-relaxed font-medium"}>
-                    Pomagają nam zbierać anonimowe statystyki o ruchu na stronie: Google Analytics oraz własne statystyki odwiedzin. Adres IP jest skracany o ostatni oktet i szyfrowany jednokierunkowym hashem (SHA-256), a dane odwiedzin są automatycznie usuwane po 90 dniach. Bez zgody żadne odwiedziny nie są rejestrowane.
+                    Pomagają nam zbierać statystyki o ruchu na stronie: Google Analytics oraz własne statystyki odwiedzin. Przy tej samej zgodzie zapisujemy profil urządzenia: rozdzielczość i głębię kolorów ekranu, proporcje okna, listę wykrytych czcionek, agenta użytkownika, platformę, język, strefę czasową, liczbę rdzeni, pamięć urządzenia, parametry karty graficznej (WebGL) oraz ustawienia systemowe (motyw, ograniczenie animacji). Adres IP jest skracany o ostatni oktet i szyfrowany jednokierunkowym hashem (SHA-256), a dane odwiedzin są automatycznie usuwane po 90 dniach. Bez zgody żadne odwiedziny ani dane urządzenia nie są rejestrowane.
                   </p>
                 </div>
               </motion.div>

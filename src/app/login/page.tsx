@@ -9,7 +9,7 @@ import { motion, AnimatePresence, Variants } from "framer-motion";
 import { Check, Mail, Shield, ArrowRight, Camera, Loader2, LogIn, X } from "lucide-react";
 import { sanitizeSvg } from "@/lib/sanitize";
 
-const API_URL = "/api";
+import { API_URL } from "@/lib/api";
 
 interface Toast {
   id: number;
@@ -709,8 +709,16 @@ const slideVariants: Variants = {
                         type="text"
                         placeholder="Nazwa użytkownika lub E-Mail"
                         value={formData.login}
+                        autoComplete="username"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
                         onChange={(e) => {
-                          setFormData({ ...formData, login: e.target.value });
+                          // Strip stray spaces and fold e-mails to lowercase as they
+                          // are typed (e-mails are case-insensitive; usernames are not).
+                          const raw = e.target.value.replace(/\s+/g, "");
+                          const v = raw.includes("@") ? raw.toLowerCase() : raw;
+                          setFormData({ ...formData, login: v });
                           setErrors({ ...errors, login: false });
                         }}
                         error={errors.login}

@@ -5,6 +5,8 @@ import "./globals.css";
 import CookieModal from "./components/CookieModal";
 import SettingsModal from "./components/SettingsModal";
 import VisitTracker from "./components/VisitTracker";
+import BirthDatePrompt from "./components/BirthDatePrompt";
+import AccentSync from "./components/AccentSync";
 import BanGuard from "./components/BanGuard";
 import { I18nProvider } from "@/lib/i18n";
 import { Suspense } from "react";
@@ -111,11 +113,64 @@ export const viewport = {
 const THEME_SCRIPT = `(function () {
   var stored = 'light';
   try { stored = localStorage.getItem('novidia-theme') || 'light'; } catch (e) {}
-  var theme = (stored === 'light' || stored === 'dark') ? stored : 'light';
-  var dark = theme === 'dark';
+  var dark;
+  if (stored === 'dark') dark = true;
+  else if (stored === 'system') dark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  else dark = false;
   var root = document.documentElement;
   root.classList.toggle('dark', dark);
   root.style.colorScheme = dark ? 'dark' : 'light';
+
+  var loc = 'pl';
+  try { loc = localStorage.getItem('novidia-locale') || 'pl'; } catch (e) {}
+  if (loc === 'ar_sa' || loc === 'ar') {
+    root.setAttribute('dir', 'rtl');
+    root.setAttribute('lang', 'ar');
+  } else {
+    root.setAttribute('dir', 'ltr');
+    root.setAttribute('lang', loc === 'en' ? 'en-GB' : loc.replace('_', '-'));
+  }
+
+  // Custom interface theme (Discord-style): one base colour (or gradient)
+  // derives both the light and dark palettes (OKLab). Cached in localStorage
+  // so they can be applied before first paint without a recompute or a flash
+  // of stock colours.
+  var accentOn = true;
+  try { accentOn = localStorage.getItem('novidia-accent-enabled') !== '0'; } catch (e) {}
+
+  // Start from a clean slate every load: drop a leftover palette tag, the
+  // gradient flag, and the inline token copies older builds parked on <html>
+  // (inline styles beat every stylesheet and would freeze the light palette).
+  var stale = document.getElementById('novidia-accent-theme');
+  if (stale) stale.remove();
+  root.classList.remove('accent-gradient');
+  root.style.removeProperty('--color-brand-gradient');
+  ['--color-main','--color-lighter','--color-medium','--color-light','--color-lightest','--color-superwhite','--color-app','--color-surface','--color-surface-raised','--color-edge','--color-edge-strong','--color-ink','--color-ink-muted','--color-ink-subtle','--color-accent','--color-on-brand','--shadow-card']
+    .forEach(function (k) { root.style.removeProperty(k); });
+
+  try {
+    var palettes = JSON.parse(localStorage.getItem('novidia-accent-palettes') || 'null');
+    if (accentOn && palettes && typeof palettes === 'object' && palettes.light && palettes.dark) {
+      var lightDecls = '';
+      var darkDecls = '';
+      Object.keys(palettes.light).forEach(function (k) { lightDecls += k + ':' + palettes.light[k] + ';'; });
+      Object.keys(palettes.dark).forEach(function (k) { darkDecls += k + ':' + palettes.dark[k] + ';'; });
+      // html:not(.dark) and html.dark both outrank the stock :root and .dark
+      // blocks, so the palette follows the class with no per-toggle sync.
+      var s = document.createElement('style');
+      s.id = 'novidia-accent-theme';
+      s.textContent = 'html:not(.dark){' + lightDecls + '}html.dark{' + darkDecls + '}';
+      document.head.appendChild(s);
+      // Two-stop gradient: brand fills (bg-main) get the gradient image.
+      // Applied only when the cache actually carries one, so a solid accent
+      // can never leave stale gradient buttons behind.
+      if (palettes.gradient) {
+        root.classList.add('accent-gradient');
+        root.style.setProperty('--color-brand-gradient', palettes.gradient);
+      }
+    }
+  } catch (e) {}
+
   root.classList.add('theme-transition');
   setTimeout(function () { root.classList.remove('theme-transition'); }, 400);
 })();`;
@@ -133,7 +188,7 @@ export default function RootLayout({
       <body className="bg-app text-ink transition-colors duration-300">
         <I18nProvider>
         <BanGuard>
-          <div id="main-content-wrapper" className="min-h-screen flex flex-col">
+          <div id="main-content-wrapper" className="min-h-screen flex flex-col pb-28 xl:pb-0">
             <Navbar navigation={[
               { id: "1", title: "Główna", url: "/" },
               { id: "2", title: "Tematy", url: "/topics" },
@@ -157,6 +212,8 @@ export default function RootLayout({
             <SettingsModal />
           </Suspense>
           <VisitTracker />
+          <BirthDatePrompt />
+          <AccentSync />
         </BanGuard>
         </I18nProvider>
       </body>

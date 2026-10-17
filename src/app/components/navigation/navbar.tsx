@@ -1,23 +1,19 @@
 "use client";
 
-import { Activity, Atom, BookOpen, ChevronDown, ChevronRight, ChevronLeft, Cpu, Film, Home, Menu, Search, X, Loader2, LogOut, User as UserIcon, Settings, LayoutDashboard, Moon, Sun } from "lucide-react";
+import { ChevronDown, Search, X, Loader2, LogOut, User as UserIcon, Settings, LayoutDashboard } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import SnakeGame from "./SnakeGame";
-import { NovButton, NovLink, NovIconButton, NovInput, NovDivider } from "@/app/components/ui";
+import BottomNav from "./BottomNav";
+import MegaMenu from "./MegaMenu";
+import { type CategoryIconKey } from "./categoryIcons";
+import { NovButton, NovLink, NovIconButton, NovInput, NovDivider, AnimatedThemeToggler } from "@/app/components/ui";
 import { useTheme } from "@/lib/useTheme";
+import { useAnimations } from "@/lib/useAnimations";
 import { useI18n } from "@/lib/i18n";
 import { sanitizeSvg } from "@/lib/sanitize";
-import UserBadge from "@/app/components/UserBadge";
-
-const categoryIcons = {
-    sport: Activity,
-    culture: BookOpen,
-    science: Atom,
-    technology: Cpu,
-    entertainment: Film,
-} as const;
+import { resetClientStateToDefaults } from "@/lib/auth";
 
 const impactColors = [
     { color: "#FFD700", stroke: "#FF4500", shadow: "#8B0000", glow: "rgba(255,215,0,0.6)" },
@@ -30,16 +26,14 @@ const impactColors = [
     { color: "#7FFF00", stroke: "#228B22", shadow: "#006400", glow: "rgba(127,255,0,0.5)" },
 ];
 
-type CategoryIconKey = keyof typeof categoryIcons;
-
-interface NavigationItem {
+export interface NavigationItem {
     id: string;
     title: string;
     url: string;
     icon?: CategoryIconKey;
 }
 
-interface Navigation {
+export interface Navigation {
     id: string;
     title: string;
     url: string;
@@ -61,15 +55,10 @@ interface ImpactPopup {
 
 export default function Navbar({ navigation }: NavbarProps) {
     const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-    const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
     const router = useRouter();
     const { setTheme, resolvedTheme } = useTheme();
+    const { animationsEnabled } = useAnimations();
     const { t } = useI18n();
-
-    const cycleTheme = () => {
-        setTheme(resolvedTheme === "dark" ? "light" : resolvedTheme === "light" ? "system" : "dark");
-    };
     
     // Auth State
     const [user, setUser] = useState<{ 
@@ -185,10 +174,9 @@ export default function Navbar({ navigation }: NavbarProps) {
     };
 
     const handleLogout = () => {
-        localStorage.removeItem("novidia_user");
+        resetClientStateToDefaults();
         setUser(null);
         setIsAuthDropdownOpen(false);
-        window.dispatchEvent(new Event("novidia_auth_change"));
         router.push("/");
     };
     
@@ -229,39 +217,11 @@ export default function Navbar({ navigation }: NavbarProps) {
         setOpenDropdown((current) => (current === id ? null : id));
     }
 
-    function toggleMobileMenu() {
-        if (isSearchActive) {
-            setIsSearchActive(false);
-            setSearchQuery("");
-        }
-        setIsMobileMenuOpen(!isMobileMenuOpen);
-        if (isMobileMenuOpen) {
-            setActiveSubmenu(null);
-        }
-    }
-
     function toggleSearch() {
         setIsSearchActive(!isSearchActive);
-        if (!isSearchActive) {
-            setIsMobileMenuOpen(false);
-            setActiveSubmenu(null);
-        } else {
+        if (isSearchActive) {
             setSearchQuery("");
         }
-    }
-
-    // Spotify-like background loading logic
-    function handleMobileNav(e: React.MouseEvent<HTMLAnchorElement>, url: string) {
-        e.preventDefault();
-        setIsMobileMenuOpen(false);
-        
-        // Prefetch the route immediately in the background
-        router.prefetch(url);
-        
-        // Wait for the mobile menu closing animation (500ms) to finish before actually pushing
-        setTimeout(() => {
-            router.push(url);
-        }, 500);
     }
 
     function handleSearchNav(e: React.MouseEvent<HTMLAnchorElement>, url: string) {
@@ -274,8 +234,6 @@ export default function Navbar({ navigation }: NavbarProps) {
         }, 300); // 300ms matches the search dropdown transition duration
     }
 
-    const activeNavObj = navigation.find((n) => n.id === activeSubmenu);
-    
     return (
         <>
             <style>{`
@@ -315,6 +273,7 @@ export default function Navbar({ navigation }: NavbarProps) {
                                                 type="button"
                                                 variant="plain"
                                                 onClick={() => toggleDropdown(item.id)}
+                                                aria-expanded={openDropdown === item.id}
                                                 className="gap-2 text-sm font-medium text-ink-subtle hover:text-ink transition-colors bg-transparent border-none"
                                             >
                                                 {item.title}
@@ -322,25 +281,6 @@ export default function Navbar({ navigation }: NavbarProps) {
                                                     className={`h-4 w-4 transition-transform ${openDropdown === item.id ? "rotate-180" : ""}`}
                                                 />
                                             </NovButton>
-                                            {openDropdown === item.id && (
-                                                <ul className="absolute right-0 z-20 gap-1 flex flex-col mt-2 w-64 overflow-hidden rounded-2xl border border-edge bg-surface p-2 shadow-lg">
-                                                    {item.children.map((child) => {
-                                                        const Icon = child.icon ? categoryIcons[child.icon] : null;
-                                                        return (
-                                                            <li key={child.id}>
-                                                                <NovLink
-                                                                    unstyled
-                                                                    href={child.url}
-                                                                    className="group flex items-center gap-2 rounded-xl px-4 py-2 text-sm text-ink-muted transition-colors outline-1 outline-[#7F77D7]/0 hover:bg-[#7F77D7]/15 hover:outline-1 hover:outline-[#7F77D7]/50 font-montserrat"
-                                                                >
-                                                                    {Icon ? <Icon className="h-4 w-4 text-ink-subtle group-hover:text-[#36316A]" /> : null}
-                                                                    <span className="font-medium text-ink-subtle group-hover:text-[#36316A] transition-colors">{child.title}</span>
-                                                                </NovLink>
-                                                            </li>
-                                                        );
-                                                    })}
-                                                </ul>
-                                            )}
                                         </>
                                     ) : (
                                         <NovLink
@@ -434,11 +374,22 @@ export default function Navbar({ navigation }: NavbarProps) {
                                     <span className="text-sm font-semibold text-ink-muted font-montserrat">
                                         {user.firstName ? `${user.firstName}${user.lastName ? ` ${user.lastName.trim().charAt(0).toUpperCase()}.` : ""}` : user.username}
                                     </span>
-                                    <UserBadge role={user.role} isVerified={user.isVerified} size={14} />
                                     <ChevronDown size={16} className={`text-ink-subtle transition-transform ${isAuthDropdownOpen ? "rotate-180" : ""}`} />
                                 </NovButton>
+                                <AnimatePresence>
                                 {isAuthDropdownOpen && (
-                                    <div className="absolute right-0 top-10 mt-3 w-80 rounded-[24px] border border-edge bg-surface shadow-2xl z-50 overflow-hidden flex flex-col pointer-events-auto transition-colors duration-300">
+                                    <motion.div
+                                        key="auth-dropdown"
+                                        initial={{ opacity: 0, y: -10, scale: 0.97 }}
+                                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                                        exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                                        transition={{
+                                            duration: animationsEnabled ? 0.18 : 0,
+                                            ease: [0.16, 1, 0.3, 1],
+                                        }}
+                                        style={{ transformOrigin: "top right" }}
+                                        className="absolute right-0 top-10 mt-3 w-80 rounded-[24px] border border-edge bg-surface shadow-2xl z-50 overflow-hidden flex flex-col pointer-events-auto transition-colors duration-300"
+                                    >
                                         {/* Inline slow rotate animation */}
                                         <style>{`
                                             @keyframes spinSlow {
@@ -542,7 +493,6 @@ export default function Navbar({ navigation }: NavbarProps) {
                                             {/* Name & Email */}
                                             <h4 className="font-extrabold text-2xl text-ink tracking-tight font-fraunces relative z-0 flex items-center gap-1.5">
                                                 {user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.firstName || user.username}
-                                                <UserBadge role={user.role} isVerified={user.isVerified} size={18} />
                                             </h4>
                                             <p className="text-xs font-semibold text-ink-subtle font-montserrat mt-0.5 relative z-0">
                                                 {user.email}
@@ -624,19 +574,19 @@ export default function Navbar({ navigation }: NavbarProps) {
                                                     {t("nav.tos")}
                                                 </NovLink>
                                                 <span className="w-1 h-1 rounded-full bg-surface-raised" />
-                                                <NovIconButton
-                                                    type="subtle"
-                                                    size="sm"
-                                                    label={resolvedTheme === "dark" ? t("nav.themeLight") : t("nav.themeDark")}
-                                                    onClick={cycleTheme}
-                                                    className="shrink-0"
-                                                >
-                                                    {resolvedTheme === "dark" ? <Sun size={13} /> : <Moon size={13} />}
-                                                </NovIconButton>
+                                                <AnimatedThemeToggler
+                                                    theme={resolvedTheme}
+                                                    onThemeChange={(next) => setTheme(next)}
+                                                    disableTransition={!animationsEnabled}
+                                                    variant="circle"
+                                                    aria-label={resolvedTheme === "dark" ? t("nav.themeLight") : t("nav.themeDark")}
+                                                    className="shrink-0 h-7 w-7 rounded-lg border border-edge bg-surface text-ink hover:text-main transition-colors flex items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5"
+                                                />
                                             </div>
                                         </div>
-                                    </div>
+                                    </motion.div>
                                 )}
+                                </AnimatePresence>
                             </div>
                         ) : (
                             <>
@@ -649,22 +599,11 @@ export default function Navbar({ navigation }: NavbarProps) {
                             </>
                         )}
                     </div>
-
-                    {/* MOBILE BURGER */}
-                    <div className="xl:hidden flex transition-all duration-500">
-                        <NovIconButton
-                            type="subtle"
-                            size="lg"
-                            label="Menu"
-                            onClick={toggleMobileMenu}
-                            className="relative"
-                        >
-                            <Menu className={`absolute h-7 w-7 transition-all duration-300 ${isMobileMenuOpen ? 'opacity-0 rotate-90 scale-50' : 'opacity-100 rotate-0 scale-100'}`} />
-                            <X className={`absolute h-7 w-7 transition-all duration-300 ${isMobileMenuOpen ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-50'}`} />
-                        </NovIconButton>
-                    </div>
                 </div>
             </div>
+
+            {/* FULLSCREEN ACCORDION MEGA MENU ("Kategorie") */}
+            <MegaMenu open={openDropdown !== null} onClose={() => setOpenDropdown(null)} />
 
             {/* SEARCH RESULTS DROPDOWN */}
             <div className={`absolute top-22 left-0 w-full px-4 md:px-8 z-50 flex justify-end transition-all duration-300 origin-top ${
@@ -700,189 +639,11 @@ export default function Navbar({ navigation }: NavbarProps) {
 
         </nav>
 
-        {/* MOBILE MENU FULLSCREEN OVERLAY */}
-        <div
-            className={`xl:hidden fixed top-22 left-0 w-full z-40 transition-all duration-500 ease-in-out border-edge overflow-hidden ${
-                isMobileMenuOpen ? "h-[80vh] opacity-100 shadow-2xl border-t bg-app/90 backdrop-blur-xl" : "h-0 opacity-0 border-t-0 bg-transparent backdrop-blur-none"
-            }`}
-        >
-            <div className="relative w-full h-full overflow-hidden p-6 md:px-8">
-                    
-                    {/* MAIN MENU VIEW */}
-                    <div 
-                        className={`absolute inset-0 w-full h-full p-6 md:px-8 flex flex-col gap-6 transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-                            activeSubmenu ? "-translate-x-full" : "translate-x-0"
-                        }`}
-                    >
-                        {navigation.map((item, index) => (
-                            <div 
-                                key={item.id} 
-                                className={`transition-all duration-500 transform ${
-                                    isMobileMenuOpen && !activeSubmenu 
-                                        ? "translate-y-0 opacity-100" 
-                                        : "translate-y-8 opacity-0"
-                                }`}
-                                style={{ transitionDelay: `${index * 50}ms` }}
-                            >
-                                {item.children?.length ? (
-                                    <NovButton
-                                        unstyled
-                                        type="button"
-                                        variant="plain"
-                                        onClick={() => setActiveSubmenu(item.id)}
-                                        className="flex items-center justify-between w-full text-left text-xl font-montserrat font-semibold text-ink-muted hover:text-main transition-colors group"
-                                    >
-                                        <span>{item.title}</span>
-                                        <ChevronRight className="h-6 w-6 text-ink-subtle group-hover:text-main transition-colors" />
-                                    </NovButton>
-                                ) : (
-                                    <NovLink
-                                        unstyled
-                                        href={item.url}
-                                        onClick={(e) => handleMobileNav(e, item.url)}
-                                        className="block w-full text-xl font-montserrat font-semibold text-ink-muted hover:text-main transition-colors"
-                                    >
-                                        {item.title}
-                                    </NovLink>
-                                )}
-                            </div>
-                        ))}
-                        
-                        {/* Mobile Auth Buttons */}
-                        <div className={`mt-auto pt-8 flex flex-col gap-4 border-t border-edge transition-all duration-500 transform ${
-                             isMobileMenuOpen && !activeSubmenu ? "translate-y-0 opacity-100" : "translate-y-8 opacity-0"
-                        }`} style={{ transitionDelay: `${navigation.length * 50}ms` }}>
-                            {user ? (
-                                <div className="flex flex-col gap-3">
-                                    <div className="flex items-center gap-3 p-3 bg-surface-raised rounded-2xl border border-edge transition-colors">
-                                        {user.profilePicture ? (
-                                            user.profilePicture.startsWith("<svg") ? (
-                                                <div 
-                                                    className="w-12 h-12 rounded-full overflow-hidden border border-edge bg-surface"
-                                                    dangerouslySetInnerHTML={{ __html: sanitizeSvg(user.profilePicture) }}
-                                                />
-                                            ) : user.profilePicture.startsWith("linear-gradient") ? (
-                                                <div 
-                                                    className="w-12 h-12 rounded-full border border-edge"
-                                                    style={{ backgroundImage: user.profilePicture, backgroundSize: "cover" }}
-                                                />
-                                            ) : (
-                                                <img
-                                                    src={user.profilePicture}
-                                                    referrerPolicy="no-referrer"
-                                                    alt={user.username}
-                                                    className="w-12 h-12 rounded-full object-cover border border-edge"
-                                                />
-                                            )
-                                        ) : (
-                                            <div className="w-12 h-12 rounded-full bg-surface-raised flex items-center justify-center text-ink-subtle">
-                                                <UserIcon size={22} />
-                                            </div>
-                                        )}
-                                        <div className="flex flex-col">
-                                            <span className="text-base font-bold text-ink font-montserrat flex items-center gap-1.5">
-                                                {user.firstName ? `${user.firstName}${user.lastName ? ` ${user.lastName.trim().charAt(0).toUpperCase()}.` : ""}` : user.username}
-                                                <UserBadge role={user.role} isVerified={user.isVerified} size={14} />
-                                            </span>
-                                            <span className="text-xs text-ink-subtle font-montserrat">{user.email}</span>
-                                        </div>
-                                    </div>
-                                    <NovLink
-                                        unstyled
-                                        href="profile"
-                                        onClick={(e) => handleMobileNav(e, "profile")}
-                                        className="flex items-center gap-3 p-3 rounded-2xl bg-surface border border-edge hover:bg-surface-raised transition-colors"
-                                    >
-                                        <UserIcon size={18} className="text-ink-subtle" />
-                                        <span className="text-sm font-semibold text-ink font-montserrat">{t("nav.yourProfile")}</span>
-                                    </NovLink>
-                                    <NovLink
-                                        unstyled
-                                        href="?settings=true"
-                                        onClick={(e) => { setIsMobileMenuOpen(false); setActiveSubmenu(null); }}
-                                        className="flex items-center gap-3 p-3 rounded-2xl bg-surface border border-edge hover:bg-surface-raised transition-colors"
-                                    >
-                                        <Settings size={18} className="text-ink-subtle" />
-                                        <span className="text-sm font-semibold text-ink font-montserrat">{t("nav.settings")}</span>
-                                    </NovLink>
-                                </div>
-                            ) : (
-                                <>
-                                    <NovLink
-                                        unstyled
-                                        href="/register"
-                                        onClick={(e) => handleMobileNav(e, "/register")}
-                                        className="w-full text-center rounded-full bg-main py-4 text-lg text-white font-montserrat font-medium transition-all hover:brightness-110"
-                                    >
-                                        {t("nav.register")}
-                                    </NovLink>
-                                    <NovLink
-                                        unstyled
-                                        href="/login"
-                                        onClick={(e) => handleMobileNav(e, "/login")}
-                                        className="w-full text-center rounded-full bg-surface-raised py-4 text-lg text-ink font-montserrat font-medium hover:bg-superwhite transition-colors"
-                                    >
-                                        {t("nav.login")}
-                                    </NovLink>
-                                </>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* SUBMENU VIEW */}
-                    <div 
-                        className={`absolute inset-0 w-full h-full p-6 md:px-8 flex flex-col transition-transform duration-500 overflow-scroll ease-[cubic-bezier(0.22,1,0.36,1)] ${
-                            activeSubmenu ? "translate-x-0" : "translate-x-full"
-                        }`}
-                    >
-                        {activeSubmenu && (
-                            <>
-                                <NovButton
-                                    unstyled
-                                    type="button"
-                                    variant="plain"
-                                    onClick={() => setActiveSubmenu(null)}
-                                    className="flex items-center gap-2 text-ink-subtle hover:text-ink transition-colors mb-8 group"
-                                >
-                                    <ChevronLeft className="h-5 w-5 group-hover:-translate-x-1 transition-transform" />
-                                    <span className="font-montserrat font-medium">{t("nav.back")}</span>
-                                </NovButton>
-                                <h3 className="text-3xl font-montserrat font-bold text-ink mb-6">
-                                    {activeNavObj?.title}
-                                </h3>
-                                <div className="flex flex-col gap-3">
-                                    {activeNavObj?.children?.map((child, index) => {
-                                        const Icon = child.icon ? categoryIcons[child.icon] : null;
-                                        return (
-                                            <NovLink
-                                                unstyled
-                                                key={child.id}
-                                                href={child.url}
-                                                onClick={(e) => handleMobileNav(e, child.url)}
-                                                className={`flex items-center gap-4 p-4 rounded-2xl bg-surface border border-edge shadow-sm hover:shadow-md hover:border-edge transition-all duration-300 transform font-montserrat ${
-                                                    activeSubmenu 
-                                                        ? "translate-y-0 opacity-100" 
-                                                        : "translate-y-8 opacity-0"
-                                                }`}
-                                                style={{ transitionDelay: `${index * 50 + 200}ms` }}
-                                            >
-                                                {Icon && (
-                                                    <div className="bg-surface p-3 rounded-xl">
-                                                        <Icon className="h-6 w-6 text-main" />
-                                                    </div>
-                                                )}
-                                                <span className="text-xl font-montserrat font-medium text-ink">
-                                                    {child.title}
-                                                </span>
-                                            </NovLink>
-                                        );
-                                    })}
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-            </div>
+        <BottomNav
+            navigation={navigation}
+            user={user}
+            onLogout={handleLogout}
+        />
 
         <SnakeGame open={isSnakeGameOpen} onClose={() => setIsSnakeGameOpen(false)} />
         </>

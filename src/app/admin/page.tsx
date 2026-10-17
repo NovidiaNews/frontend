@@ -9,13 +9,12 @@ import {
   ChevronDown, ChevronRight, Trash2, Edit3, Filter,
   AlertCircle, Info, AlertOctagon, Bug, List, Ban,
   ShieldOff, Plus, Clock, LayoutDashboard, Database, Activity,
-  Cpu, MemoryStick, Server, HardDrive, Eye, Globe, MapPin,
+  Cpu, MemoryStick, Server, HardDrive, Eye, Globe, MapPin, Power,
 } from "lucide-react";
 import VisitsMap from "../components/VisitsMap";
-import UserBadge from "../components/UserBadge";
 import { NovButton, NovCheckbox, NovIconButton, NovInput, NovSelect, NovTextarea, NovToast } from "@/app/components/ui";
 
-const API_URL = "/api";
+import { API_URL } from "@/lib/api";
 
 type Tab = "overview" | "users" | "articles" | "logs" | "visits" | "ipbans";
 type SortDir = "asc" | "desc";
@@ -245,7 +244,7 @@ export default function AdminPage() {
         </div>
         <TabNav activeTab={activeTab} onTabChange={setActiveTab} />
         {activeTab === "overview" && <OverviewPanel />}
-        {activeTab === "users" && <UsersPanel currentUserId={authUser.id} />}
+        {activeTab === "users" && <UsersPanel currentUserId={authUser.id} myRole={authUser.role} />}
         {activeTab === "articles" && <ArticlesPanel />}
         {activeTab === "logs" && <LogsPanel />}
         {activeTab === "visits" && <VisitsPanel />}
@@ -494,8 +493,7 @@ function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void 
 // ---------------------------------------------------------------------------
 // Users
 // ---------------------------------------------------------------------------
-
-function UsersPanel({ currentUserId }: { currentUserId: string }) {
+function UsersPanel({ currentUserId, myRole }: { currentUserId: string; myRole: number }) {
   const router = useRouter();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -591,6 +589,25 @@ function UsersPanel({ currentUserId }: { currentUserId: string }) {
     } catch (err: unknown) { showNotification("error", err instanceof Error ? err.message : "Błąd sieci"); }
   };
 
+  // Enable / disable an account (more granular than a full ban).
+  const toggleDisable = async (id: string, disabled: boolean) => {
+    const question = disabled
+      ? "Czy na pewno chcesz WYŁĄCZYĆ to konto? Użytkownik przestanie mieć dostęp."
+      : "Czy na pewno chcesz ponownie WŁĄczyć to konto?";
+    if (!confirm(question)) return;
+    try {
+      const res = await apikey(`/admin/users/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ isDisabled: disabled }),
+      });
+      if (!res.ok) { const err = await res.json().catch(() => ({}) as { message?: string }); throw new Error(err.message || "Nie udało się zmienić stanu konta"); }
+      showNotification("success", disabled ? "Konto wyłączone" : "Konto włączone");
+      fetchUsers();
+    } catch (err: unknown) { showNotification("error", err instanceof Error ? err.message : "Błąd sieci"); }
+  };
+
   return (
     <div>
       {notification && <Notification n={notification} />}
@@ -630,6 +647,10 @@ function UsersPanel({ currentUserId }: { currentUserId: string }) {
               <tbody>
                 {sortedUsers.map((user) => {
                   const isSelf = user.id === currentUserId;
+                  const rank = Number(user.role || 0);
+                  const outranksMe = !isSelf && rank > myRole;
+                  const blocked = isSelf || outranksMe;
+                  const blockReason = isSelf ? "Nie możesz wykonywać tej akcji na własnym koncie" : outranksMe ? "Ranga tego użytkownika jest wyższa od Twojej" : undefined;
                   const role = roleLabel(user.role);
                   return (
                     <tr key={user.id} className={`border-b border-edge transition-colors ${user.isBanned ? "bg-red-50/60" : isSelf ? "bg-surface-raised" : "hover:bg-surface-raised"}`}>
@@ -643,17 +664,6 @@ function UsersPanel({ currentUserId }: { currentUserId: string }) {
                             )}
                           </div>
                           {user.username}
-                          {!isSelf ? (
-                            <button
-                              onClick={() => toggleVerify(user.id)}
-                              className="cursor-pointer hover:opacity-70 transition-opacity"
-                              title={user.isVerified ? "Kliknij aby odebrać weryfikację" : "Kliknij aby nadać weryfikację"}
-                            >
-                              <UserBadge role={user.role} isVerified={user.isVerified} size={14} />
-                            </button>
-                          ) : (
-                            <UserBadge role={user.role} isVerified={user.isVerified} size={14} />
-                          )}
                           {isSelf && <span className="text-xs text-ink-subtle font-normal">(ty)</span>}
                         </div>
                       </td>
@@ -697,6 +707,8 @@ function UsersPanel({ currentUserId }: { currentUserId: string }) {
                             ? <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-full flex items-center gap-1"><AlertCircle size={11} />Zablokowany{(user as Record<string, unknown>).unbanDate ? ` → ${new Date((user as Record<string, unknown>).unbanDate as string).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}</span>
                             : <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1"><Check size={11} />Aktywny</span>}
                           {user.strikes > 0 && <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">♂ {user.strikes}♂</span>}
+                          {user.isDisabled === true && <span className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full flex items-center gap-1"><Power size={11} />Wyłączone</span>}
+                          {user.isRestricted === true && <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">Ograniczone</span>}
                           {!user.isVerified && <span className="text-xs font-bold text-ink-muted bg-surface-raised px-2 py-0.5 rounded-full">Niezweryfikowany</span>}
                         </div>
                       </td>
@@ -711,31 +723,42 @@ function UsersPanel({ currentUserId }: { currentUserId: string }) {
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1 flex-wrap">
                           {user.isBanned ? (
-                            <NovButton unstyled onClick={() => unbanUser(user.id)}
+                            <NovButton unstyled onClick={() => !blocked && unbanUser(user.id)}
+                              disabled={blocked}
                               className="px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-600 hover:bg-emerald-50 transition-colors cursor-pointer flex items-center gap-1"
                             ><Check size={12} /> Odbanuj</NovButton>
                           ) : (
-                            <NovButton unstyled onClick={() => !isSelf && setBanningUser(user)}
-                              disabled={isSelf}
+                            <NovButton unstyled onClick={() => !blocked && setBanningUser(user)}
+                              disabled={blocked}
                               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ${
                                 isSelf ? "text-ink-subtle cursor-not-allowed" : "text-red-600 hover:bg-red-50 cursor-pointer"
                               }`}
-                              title={isSelf ? "Nie możesz zbanować siebie" : "Zbanuj użytkownika"}
+                              title={blockReason || "Zbanuj użytkownika"}
                             ><Ban size={12} /> Zbanuj</NovButton>
                           )}
-                          <NovButton unstyled onClick={() => !isSelf && setEditingUser(user)}
-                            disabled={isSelf}
+                          <NovButton unstyled onClick={() => !blocked && toggleVerify(user.id)}
+                            disabled={blocked}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1 ${blocked ? "text-ink-subtle cursor-not-allowed" : "text-ink-muted hover:bg-surface-raised"}`}
+                            title={blockReason || (user.isVerified ? "Odbierz weryfikację" : "Nadaj weryfikację")}
+                          ><Shield size={12} /> {user.isVerified ? "Odbierz" : "Weryfikuj"}</NovButton>
+                          <NovButton unstyled onClick={() => !blocked && toggleDisable(user.id, !user.isDisabled)}
+                            disabled={blocked}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1 ${blocked ? "text-ink-subtle cursor-not-allowed" : "text-indigo-600 hover:bg-indigo-50"}`}
+                            title={blockReason || (user.isDisabled ? "Włącz konto" : "Wyłącz konto")}
+                          ><Power size={12} /> {user.isDisabled ? "Włącz" : "Wyłącz"}</NovButton>
+                          <NovButton unstyled onClick={() => !blocked && setEditingUser(user)}
+                            disabled={blocked}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ${
                               isSelf ? "text-ink-subtle cursor-not-allowed" : "text-main hover:bg-main/10 cursor-pointer"
                             }`}
-                            title={isSelf ? "Nie możesz edytować siebie" : "Edytuj użytkownika"}
+                            title={blockReason || "Edytuj użytkownika"}
                           ><Edit3 size={12} /> Edytuj</NovButton>
-                          <NovButton unstyled onClick={() => !isSelf && deleteUser(user.id)}
-                            disabled={isSelf}
+                          <NovButton unstyled onClick={() => !blocked && deleteUser(user.id)}
+                            disabled={blocked}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ${
                               isSelf ? "text-ink-subtle cursor-not-allowed" : "text-red-600 hover:bg-red-50 cursor-pointer"
                             }`}
-                            title={isSelf ? "Nie możesz usunąć siebie" : "Usuń użytkownika"}
+                            title={blockReason || "Usuń użytkownika"}
                           ><Trash2 size={12} /> Usuń</NovButton>
                         </div>
                       </td>

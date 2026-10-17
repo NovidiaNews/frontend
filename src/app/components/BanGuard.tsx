@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import BanScreen from "./BanScreen";
 
-const API_URL = "/api";
+import { API_URL } from "@/lib/api";
 
 interface BanData {
   unbanDate: string | null;

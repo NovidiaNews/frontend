@@ -96,9 +96,9 @@ export const novidiaConfig = {
     },
 
     switch: {
-        on: "bg-main",
-        off: "bg-edge-strong",
-        knob: "w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform",
+        on: "bg-main border-main shadow-xs",
+        off: "bg-zinc-300 dark:bg-zinc-700/90 border-zinc-400 dark:border-zinc-500/80 hover:bg-zinc-400/80 dark:hover:bg-zinc-600 shadow-inner",
+        knob: "rounded-full bg-white shadow-md transition-transform",
     },
 
     checkbox: {

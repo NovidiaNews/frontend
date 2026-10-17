@@ -15,5 +15,7 @@ export { NovToastProgress, NovToastCount, NovToastClose } from "./NovToast";
 export { default as NovProgress } from "./NovProgress";
 export { default as NovSkeleton } from "./NovSkeleton";
 export { default as NovDivider } from "./NovDivider";
+export { default as ColorPicker } from "./ColorPicker";
+export { AnimatedThemeToggler } from "./AnimatedThemeToggler";
 export { novidiaConfig } from "./config";
 export type { NovButtonVariant, NovButtonSize, NovLinkVariant, NovBadgeTone } from "./config";
