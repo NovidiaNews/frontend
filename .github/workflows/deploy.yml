@@ -67,7 +67,7 @@ jobs:
             release/ \
             "novidia-frontend-deploy@$VPS_HOST:/home/novidia-frontend-deploy/releases/current/"
 
-      - name: Diagnose deployment access
+      - name: Deploy
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
@@ -75,7 +75,6 @@ jobs:
           ssh -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o BatchMode=yes \
-            -o ConnectTimeout=10 \
             -p "$VPS_PORT" \
             "novidia-frontend-deploy@$VPS_HOST" \
-            'id; sudo -n -l; ls -ld "$HOME/releases" "$HOME/releases/current"'
+            'sudo -n /usr/local/sbin/novidia-deploy frontend'
