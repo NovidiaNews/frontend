@@ -10,13 +10,15 @@ import {
   AlertCircle, Info, AlertOctagon, Bug, List, Ban,
   ShieldOff, Plus, Clock, LayoutDashboard, Database, Activity,
   Cpu, MemoryStick, Server, HardDrive, Eye, Globe, MapPin, Power,
+  LifeBuoy, Flag, MessageSquare, Send, Mail, Gavel, ExternalLink,
+  CircleCheck, Inbox, History,
 } from "lucide-react";
 import VisitsMap from "../components/VisitsMap";
 import { NovButton, NovCheckbox, NovIconButton, NovInput, NovSelect, NovTextarea, NovToast } from "@/app/components/ui";
 
 import { API_URL } from "@/lib/api";
 
-type Tab = "overview" | "users" | "articles" | "logs" | "visits" | "ipbans";
+type Tab = "overview" | "users" | "articles" | "logs" | "visits" | "ipbans" | "support";
 type SortDir = "asc" | "desc";
 type Level = "error" | "warn" | "info" | "debug" | "fatal";
 
@@ -117,6 +119,80 @@ interface IpBanRecord {
   createdAt: string;
   expiresAt: string | null;
   active: boolean;
+}
+
+interface SupportUser {
+  id: string;
+  username: string;
+  email: string;
+  role: number;
+  strikes: number;
+  isBanned: boolean;
+  unbanDate: string | null;
+  isDisabled: boolean;
+  isVerified: boolean;
+  notificationsEnabled: boolean;
+  createdAt: string;
+}
+
+interface TicketMessageRecord {
+  id: string;
+  authorId: string | null;
+  authorType: string;
+  authorName: string | null;
+  body: string;
+  createdAt: string;
+}
+
+interface TicketSummary {
+  id: string;
+  subject: string;
+  category: string;
+  status: string;
+  priority: string;
+  assignedTo: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastMessageAt: string;
+  messageCount: number;
+  user: SupportUser;
+  lastMessage: { body: string; authorType: string; authorName: string | null; createdAt: string } | null;
+}
+
+interface TicketDetail extends TicketSummary {
+  messages: TicketMessageRecord[];
+}
+
+interface ReportRecord {
+  id: string;
+  type: string;
+  reason: string;
+  details: string | null;
+  status: string;
+  reporterId: string | null;
+  reporterUsername: string | null;
+  targetUserId: string | null;
+  targetUsername: string | null;
+  contentId: string | null;
+  contentLabel: string | null;
+  resolution: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+interface AuditRecord {
+  id: string;
+  action: string;
+  userId: string | null;
+  actorUsername: string | null;
+  details: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+interface SupportOverview {
+  tickets: { open: number; pending: number; resolved: number; total: number; active: number };
+  reports: { open: number; reviewing: number; resolved: number; total: number; active: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +325,7 @@ export default function AdminPage() {
         {activeTab === "logs" && <LogsPanel />}
         {activeTab === "visits" && <VisitsPanel />}
         {activeTab === "ipbans" && <IpBansPanel />}
+        {activeTab === "support" && <SupportPanel currentUserId={authUser.id} myRole={authUser.role} />}
       </div>
     </div>
   );
@@ -262,6 +339,7 @@ function TabNav({ activeTab, onTabChange }: { activeTab: Tab; onTabChange: (t: T
     { id: "logs", label: "Logi", icon: Terminal },
     { id: "visits", label: "Odwiedziny", icon: Eye },
     { id: "ipbans", label: "IP Bany", icon: Shield },
+    { id: "support", label: "Wsparcie", icon: LifeBuoy },
   ];
   return (
     <div className="flex gap-2.5 mb-6 bg-surface-raised rounded-full p-1 w-fit overflow-x-auto max-w-full">
@@ -784,14 +862,14 @@ function UsersPanel({ currentUserId, myRole }: { currentUserId: string; myRole: 
   );
 }
 
-function ModalShell({ title, icon, onClose, children, footer }: {
+function ModalShell({ title, icon, onClose, children, footer, size = "md" }: {
   title: string; icon: typeof Shield; onClose: () => void;
-  children: React.ReactNode; footer: React.ReactNode;
+  children: React.ReactNode; footer: React.ReactNode; size?: "md" | "lg";
 }) {
   const Icon = icon;
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-surface rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
+      <div className={`bg-surface rounded-2xl w-full ${size === "lg" ? "max-w-4xl" : "max-w-2xl"} max-h-[85vh] flex flex-col shadow-2xl`}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-edge">
           <h3 className="text-lg font-bold text-ink font-fraunces flex items-center gap-2">
             <Icon size={18} className="text-main" /> {title}
@@ -1832,5 +1910,1113 @@ function IpBansPanel() {
         </div>
       )}
     </div>
+  );
+}
+// ---------------------------------------------------------------------------
+// Support (tickets, reports, moderation history)
+// ---------------------------------------------------------------------------
+
+const TICKET_STATUS_META: Record<string, { label: string; cls: string }> = {
+  OPEN: { label: "Otwarte", cls: "bg-blue-100 text-blue-700" },
+  PENDING: { label: "Czeka na klienta", cls: "bg-amber-100 text-amber-700" },
+  RESOLVED: { label: "Rozwiązane", cls: "bg-emerald-100 text-emerald-700" },
+  CLOSED: { label: "Zamknięte", cls: "bg-surface-raised text-ink-muted" },
+};
+
+const TICKET_CATEGORY_LABEL: Record<string, string> = {
+  GENERAL: "Ogólne",
+  ACCOUNT: "Konto",
+  BILLING: "Płatności",
+  BUG: "Błąd",
+  CONTENT: "Treści",
+  OTHER: "Inne",
+};
+
+const PRIORITY_META: Record<string, { label: string; cls: string }> = {
+  LOW: { label: "Niski", cls: "bg-surface-raised text-ink-muted" },
+  NORMAL: { label: "Normalny", cls: "bg-blue-100 text-blue-700" },
+  HIGH: { label: "Wysoki", cls: "bg-red-100 text-red-700" },
+};
+
+const REPORT_STATUS_META: Record<string, { label: string; cls: string }> = {
+  OPEN: { label: "Otwarte", cls: "bg-red-100 text-red-700" },
+  REVIEWING: { label: "W przeglądzie", cls: "bg-amber-100 text-amber-700" },
+  RESOLVED: { label: "Rozwiązane", cls: "bg-emerald-100 text-emerald-700" },
+  DISMISSED: { label: "Odrzucone", cls: "bg-surface-raised text-ink-muted" },
+};
+
+const AUDIT_ACTION_LABEL: Record<string, string> = {
+  "support.ticket.reply": "Odpowiedź w zgłoszeniu",
+  "support.ticket.update": "Zmiana zgłoszenia",
+  "support.ticket.delete": "Usunięcie zgłoszenia",
+  "support.report.update": "Rozstrzygnięcie zgłoszenia o naruszeniu",
+  "support.report.delete": "Usunięcie zgłoszenia o naruszeniu",
+  "support.warn": "Ostrzeżenie (strike)",
+};
+
+const ticketStatusBadge = (status: string) => {
+  const s = TICKET_STATUS_META[status] || { label: status, cls: "bg-surface-raised text-ink-muted" };
+  return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${s.cls}`}>{s.label}</span>;
+};
+
+const reportStatusBadge = (status: string) => {
+  const s = REPORT_STATUS_META[status] || { label: status, cls: "bg-surface-raised text-ink-muted" };
+  return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${s.cls}`}>{s.label}</span>;
+};
+
+const fmtDateTime = (iso: string) =>
+  new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+function SupportPanel({ currentUserId, myRole }: { currentUserId: string; myRole: number }) {
+  const router = useRouter();
+  const [view, setView] = useState<"tickets" | "reports" | "audit">("tickets");
+  const [overview, setOverview] = useState<SupportOverview | null>(null);
+  const [tickets, setTickets] = useState<TicketSummary[]>([]);
+  const [reports, setReports] = useState<ReportRecord[]>([]);
+  const [auditEntries, setAuditEntries] = useState<AuditRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [typeFilter, setTypeFilter] = useState("ALL");
+  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [openTicketId, setOpenTicketId] = useState<string | null>(null);
+  const [openReport, setOpenReport] = useState<ReportRecord | null>(null);
+  const [punishing, setPunishing] = useState<{ userId: string; username: string } | null>(null);
+  const [notification, setNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const showNotification = (type: "success" | "error", message: string) => {
+    setNotification({ type, message });
+    setTimeout(() => setNotification(null), 3500);
+    if (type === "error") console.error(`[Admin Error] ${message}`);
+  };
+
+  const fetchData = async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const [ovRes, tkRes, rpRes, auRes] = await Promise.all([
+        apikey("/admin/support/overview", { credentials: "include" }),
+        apikey("/admin/support/tickets", { credentials: "include" }),
+        apikey("/admin/support/reports", { credentials: "include" }),
+        apikey("/admin/support/audit?limit=60", { credentials: "include" }),
+      ]);
+      if (ovRes.status === 401) { router.push("/login"); return; }
+      if (!ovRes.ok || !tkRes.ok || !rpRes.ok) throw new Error("Nie udało się pobrać danych wsparcia");
+      setOverview(await ovRes.json());
+      setTickets(await tkRes.json());
+      setReports(await rpRes.json());
+      if (auRes.ok) setAuditEntries(await auRes.json());
+    } catch (err: unknown) {
+      showNotification("error", err instanceof Error ? err.message : "Błąd sieci");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  const patchTicket = async (id: string, body: Record<string, unknown>, okMessage: string) => {
+    try {
+      const res = await apikey(`/admin/support/tickets/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) { const err = await res.json().catch(() => ({}) as { message?: string }); throw new Error(err.message || "Nie udało się zaktualizować zgłoszenia"); }
+      showNotification("success", okMessage);
+      fetchData(true);
+    } catch (err: unknown) {
+      showNotification("error", err instanceof Error ? err.message : "Błąd sieci");
+    }
+  };
+
+  const filteredTickets = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return tickets.filter((t) => {
+      if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
+      if (categoryFilter !== "ALL" && t.category !== categoryFilter) return false;
+      if (!q) return true;
+      return (
+        t.subject.toLowerCase().includes(q) ||
+        t.user?.username?.toLowerCase().includes(q) ||
+        t.user?.email?.toLowerCase().includes(q) ||
+        (t.lastMessage?.body || "").toLowerCase().includes(q)
+      );
+    });
+  }, [tickets, search, statusFilter, categoryFilter]);
+
+  const filteredReports = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return reports.filter((r) => {
+      if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
+      if (typeFilter !== "ALL" && r.type !== typeFilter) return false;
+      if (!q) return true;
+      return (
+        r.reason.toLowerCase().includes(q) ||
+        (r.targetUsername || "").toLowerCase().includes(q) ||
+        (r.reporterUsername || "").toLowerCase().includes(q) ||
+        (r.contentLabel || "").toLowerCase().includes(q) ||
+        (r.details || "").toLowerCase().includes(q)
+      );
+    });
+  }, [reports, search, statusFilter, typeFilter]);
+
+  const filteredAudit = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return auditEntries;
+    return auditEntries.filter(
+      (a) =>
+        (AUDIT_ACTION_LABEL[a.action] || a.action).toLowerCase().includes(q) ||
+        (a.actorUsername || "").toLowerCase().includes(q) ||
+        JSON.stringify(a.details || {}).toLowerCase().includes(q)
+    );
+  }, [auditEntries, search]);
+
+  return (
+    <div className="space-y-6">
+      {notification && <Notification n={notification} />}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard icon={Inbox} label="Aktywne zgłoszenia" value={String(overview?.tickets.active ?? "—")} sub={`${overview?.tickets.total ?? 0} łącznie`} />
+        <StatCard icon={MessageSquare} label="Czeka na odpowiedź" value={String(overview?.tickets.open ?? "—")} sub="tickety klientów" />
+        <StatCard icon={Flag} label="Zgłoszenia naruszeń" value={String(overview?.reports.active ?? "—")} sub={`${overview?.reports.total ?? 0} łącznie`} />
+        <StatCard icon={CircleCheck} label="Rozwiązane" value={String((overview?.tickets.resolved ?? 0) + (overview?.reports.resolved ?? 0))} sub="tickety + naruszenia" />
+      </div>
+
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex gap-1.5 bg-surface-raised rounded-full p-1 border border-edge">
+          {([
+            { id: "tickets" as const, label: "Zgłoszenia klientów", icon: MessageSquare },
+            { id: "reports" as const, label: "Zgłoszenia naruszeń", icon: Flag },
+            { id: "audit" as const, label: "Historia moderacji", icon: History },
+          ]).map((tab) => {
+            const Icon = tab.icon;
+            const active = view === tab.id;
+            return (
+              <NovButton unstyled key={tab.id} onClick={() => { setView(tab.id); setSearch(""); setStatusFilter("ALL"); }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold transition-colors cursor-pointer ${
+                  active ? "bg-main text-white shadow-sm" : "text-ink-muted hover:text-ink"
+                }`}
+              >
+                <Icon size={13} /> {tab.label}
+              </NovButton>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap flex-1 justify-end min-w-0">
+          <div className="relative flex-1 min-w-40 max-w-xs">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
+            <NovInput unstyled type="text" placeholder="Szukaj..." value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 rounded-xl border border-edge bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-main/30"
+            />
+          </div>
+          {view !== "audit" && (
+            <NovSelect unstyled className="py-2 rounded-xl border border-edge bg-surface text-sm w-auto" value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="ALL">Każdy status</option>
+              {view === "tickets"
+                ? Object.entries(TICKET_STATUS_META).map(([v, m]) => <option key={v} value={v}>{m.label}</option>)
+                : Object.entries(REPORT_STATUS_META).map(([v, m]) => <option key={v} value={v}>{m.label}</option>)}
+            </NovSelect>
+          )}
+          {view === "tickets" && (
+            <NovSelect unstyled className="py-2 rounded-xl border border-edge bg-surface text-sm w-auto" value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+            >
+              <option value="ALL">Każda kategoria</option>
+              {Object.entries(TICKET_CATEGORY_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </NovSelect>
+          )}
+          {view === "reports" && (
+            <NovSelect unstyled className="py-2 rounded-xl border border-edge bg-surface text-sm w-auto" value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+            >
+              <option value="ALL">Każdy typ</option>
+              <option value="USER">Użytkownicy</option>
+              <option value="CONTENT">Treści</option>
+            </NovSelect>
+          )}
+          <NovButton variant="outline" onClick={() => fetchData()} className="font-semibold">
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Odśwież
+          </NovButton>
+        </div>
+      </div>
+
+      {loading && tickets.length === 0 ? (
+        <div className="grid gap-3">{[1, 2, 3].map((i) => <div key={i} className="h-16 bg-surface-raised rounded-xl animate-pulse" />)}</div>
+      ) : view === "tickets" ? (
+        <div className="bg-surface rounded-2xl border border-edge overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-edge bg-surface-raised">
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Temat</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Klient</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Kategoria</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Status</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Priorytet</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Ostatnia wiadomość</th>
+                  <th className="text-right px-4 py-3 font-semibold text-ink-muted">Akcje</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTickets.map((t) => (
+                  <tr key={t.id} className="border-b border-edge hover:bg-surface-raised transition-colors">
+                    <td className="px-4 py-3 max-w-xs">
+                      <div className="font-medium text-ink truncate">{t.subject}</div>
+                      <div className="text-xs text-ink-subtle truncate">{t.lastMessage?.body || "Brak wiadomości"}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="text-ink font-medium">{t.user?.username || "—"}</div>
+                      <div className="text-xs text-ink-muted truncate max-w-40">{t.user?.email}</div>
+                    </td>
+                    <td className="px-4 py-3 text-ink-muted text-xs">{TICKET_CATEGORY_LABEL[t.category] || t.category}</td>
+                    <td className="px-4 py-3">{ticketStatusBadge(t.status)}</td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${(PRIORITY_META[t.priority] || PRIORITY_META.NORMAL).cls}`}>
+                        {(PRIORITY_META[t.priority] || PRIORITY_META.NORMAL).label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-ink-muted whitespace-nowrap">
+                      {fmtDateTime(t.lastMessageAt)}
+                      <span className="text-ink-subtle"> · {t.messageCount} wiad.</span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <NovButton unstyled onClick={() => setOpenTicketId(t.id)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-main hover:bg-main/10 transition-colors cursor-pointer flex items-center gap-1"
+                        ><MessageSquare size={12} /> Otwórz</NovButton>
+                        {t.status !== "RESOLVED" && (
+                          <NovButton unstyled onClick={() => patchTicket(t.id, { status: "RESOLVED" }, "Zgłoszenie oznaczone jako rozwiązane")}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-600 hover:bg-emerald-50 transition-colors cursor-pointer flex items-center gap-1"
+                          ><CircleCheck size={12} /> Rozwiąż</NovButton>
+                        )}
+                        {t.user && (
+                          <NovButton unstyled
+                            onClick={() => t.user.id !== currentUserId && setPunishing({ userId: t.user.id, username: t.user.username })}
+                            disabled={t.user.id === currentUserId || t.user.role > myRole}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ${
+                              t.user.id === currentUserId || t.user.role > myRole
+                                ? "text-ink-subtle cursor-not-allowed"
+                                : "text-red-600 hover:bg-red-50 cursor-pointer"
+                            }`}
+                            title="Ukarz użytkownika"
+                          ><Gavel size={12} /></NovButton>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {filteredTickets.length === 0 && (
+            <div className="text-center py-12 text-ink-muted text-sm">Brak zgłoszeń klientów</div>
+          )}
+        </div>
+      ) : view === "reports" ? (
+        <div className="bg-surface rounded-2xl border border-edge overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-edge bg-surface-raised">
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Typ</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Powód</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Zgłaszający</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Cel</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Status</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Data</th>
+                  <th className="text-right px-4 py-3 font-semibold text-ink-muted">Akcje</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredReports.map((r) => (
+                  <tr key={r.id} className="border-b border-edge hover:bg-surface-raised transition-colors">
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                        r.type === "USER" ? "bg-purple-100 text-purple-700" : "bg-cyan-100 text-cyan-700"
+                      }`}>
+                        {r.type === "USER" ? <Users size={11} /> : <FileText size={11} />}
+                        {r.type === "USER" ? "Użytkownik" : "Treść"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 max-w-xs">
+                      <div className="text-ink font-medium truncate">{r.reason}</div>
+                      {r.details && <div className="text-xs text-ink-subtle truncate">{r.details}</div>}
+                    </td>
+                    <td className="px-4 py-3 text-ink-muted text-xs">{r.reporterUsername || "—"}</td>
+                    <td className="px-4 py-3 text-xs">
+                      {r.type === "USER" ? (
+                        <span className="text-ink font-medium">@{r.targetUsername || "?"}</span>
+                      ) : (
+                        <span className="text-ink font-medium truncate block max-w-40">{r.contentLabel || r.contentId || "—"}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">{reportStatusBadge(r.status)}</td>
+                    <td className="px-4 py-3 text-xs text-ink-muted whitespace-nowrap">{fmtDateTime(r.createdAt)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <NovButton unstyled onClick={() => setOpenReport(r)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-main hover:bg-main/10 transition-colors cursor-pointer flex items-center gap-1"
+                        ><Eye size={12} /> Otwórz</NovButton>
+                        {r.status !== "RESOLVED" && r.status !== "DISMISSED" && (
+                          <NovButton unstyled onClick={() => resolveReport(r.id, "RESOLVED")}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-600 hover:bg-emerald-50 transition-colors cursor-pointer flex items-center gap-1"
+                          ><CircleCheck size={12} /> Rozwiąż</NovButton>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {filteredReports.length === 0 && (
+            <div className="text-center py-12 text-ink-muted text-sm">Brak zgłoszeń o naruszeniach</div>
+          )}
+        </div>
+      ) : (
+        <div className="bg-surface rounded-2xl border border-edge overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-edge bg-surface-raised">
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Akcja</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Moderator</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Szczegóły</th>
+                  <th className="text-left px-4 py-3 font-semibold text-ink-muted">Data</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredAudit.map((a) => (
+                  <tr key={a.id} className="border-b border-edge hover:bg-surface-raised transition-colors">
+                    <td className="px-4 py-3 font-medium text-ink">{AUDIT_ACTION_LABEL[a.action] || a.action}</td>
+                    <td className="px-4 py-3 text-ink-muted text-xs">{a.actorUsername || "—"}</td>
+                    <td className="px-4 py-3 text-xs text-ink-muted max-w-md">
+                      <span className="block truncate">{summarizeAudit(a)}</span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-ink-muted whitespace-nowrap">{fmtDateTime(a.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {filteredAudit.length === 0 && (
+            <div className="text-center py-12 text-ink-muted text-sm">Brak historii moderacji</div>
+          )}
+        </div>
+      )}
+
+      {openTicketId && (
+        <TicketDetailModal
+          ticketId={openTicketId}
+          myRole={myRole}
+          currentUserId={currentUserId}
+          onClose={() => setOpenTicketId(null)}
+          onChanged={() => fetchData(true)}
+          onPunish={(userId, username) => setPunishing({ userId, username })}
+          onNotify={showNotification}
+        />
+      )}
+      {openReport && (
+        <ReportDetailModal
+          report={openReport}
+          myRole={myRole}
+          currentUserId={currentUserId}
+          onClose={() => setOpenReport(null)}
+          onChanged={(updated) => { setOpenReport(updated); fetchData(true); }}
+          onPunish={(userId, username) => setPunishing({ userId, username })}
+          onNotify={showNotification}
+        />
+      )}
+      {punishing && (
+        <PunishUserModal
+          userId={punishing.userId}
+          username={punishing.username}
+          myRole={myRole}
+          onClose={() => setPunishing(null)}
+          onChanged={() => fetchData(true)}
+          onNotify={showNotification}
+        />
+      )}
+    </div>
+  );
+
+  function resolveReport(id: string, status: string, resolution?: string) {
+    fetch(`${API_URL}/admin/support/reports/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ status, resolution }),
+    })
+      .then(async (res) => {
+        if (!res.ok) { const err = await res.json().catch(() => ({}) as { message?: string }); throw new Error(err.message || "Nie udało się zaktualizować zgłoszenia"); }
+        showNotification("success", status === "RESOLVED" ? "Zgłoszenie rozwiązane" : "Zgłoszenie odrzucone");
+        fetchData(true);
+      })
+      .catch((err: unknown) => showNotification("error", err instanceof Error ? err.message : "Błąd sieci"));
+  }
+}
+
+function summarizeAudit(a: AuditRecord): string {
+  const d = a.details || {};
+  const parts: string[] = [];
+  if (typeof d.subject === "string") parts.push(`"${d.subject}"`);
+  if (typeof d.targetUsername === "string") parts.push(`cel: @${d.targetUsername}`);
+  if (typeof d.reason === "string") parts.push(d.reason);
+  if (typeof d.status === "string") parts.push(`status → ${d.status}`);
+  if (typeof d.emailSent === "boolean") parts.push(d.emailSent ? "e-mail wysłany" : "e-mail nie wysłany");
+  if (d.changes && typeof d.changes === "object") {
+    const changes = d.changes as Record<string, unknown>;
+    parts.push(Object.entries(changes).map(([k, v]) => `${k}=${String(v)}`).join(", "));
+  }
+  return parts.join(" · ") || "—";
+}
+
+function TicketDetailModal({ ticketId, onClose, onChanged, onPunish, onNotify, myRole, currentUserId }: {
+  ticketId: string;
+  onClose: () => void;
+  onChanged: () => void;
+  onPunish: (userId: string, username: string) => void;
+  onNotify: (type: "success" | "error", message: string) => void;
+  myRole: number;
+  currentUserId: string;
+}) {
+  const [ticket, setTicket] = useState<TicketDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [reply, setReply] = useState("");
+  const [sending, setSending] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [emailFailed, setEmailFailed] = useState(false);
+
+  const fetchTicket = async () => {
+    try {
+      const res = await apikey(`/admin/support/tickets/${ticketId}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Nie udało się pobrać zgłoszenia");
+      setTicket(await res.json());
+    } catch (err: unknown) {
+      onNotify("error", err instanceof Error ? err.message : "Błąd sieci");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchTicket(); }, [ticketId]);
+
+  const sendReply = async () => {
+    if (!reply.trim()) return;
+    setSending(true);
+    try {
+      const res = await apikey(`/admin/support/tickets/${ticketId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ body: reply.trim() }),
+      });
+      if (!res.ok) { const err = await res.json().catch(() => ({}) as { message?: string }); throw new Error(err.message || "Nie udało się wysłać odpowiedzi"); }
+      const data = await res.json() as { emailSent: boolean };
+      setEmailFailed(!data.emailSent);
+      setReply("");
+      onNotify("success", data.emailSent ? "Odpowiedź wysłana — klient otrzymał e-mail" : "Odpowiedź wysłana (e-mail nie został dostarczony)");
+      await fetchTicket();
+      onChanged();
+    } catch (err: unknown) {
+      onNotify("error", err instanceof Error ? err.message : "Błąd sieci");
+    }
+    setSending(false);
+  };
+
+  const changeStatus = async (status: string) => {
+    setStatusBusy(true);
+    try {
+      const res = await apikey(`/admin/support/tickets/${ticketId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) { const err = await res.json().catch(() => ({}) as { message?: string }); throw new Error(err.message || "Nie udało się zmienić statusu"); }
+      onNotify("success", `Status: ${(TICKET_STATUS_META[status] || { label: status }).label}`);
+      await fetchTicket();
+      onChanged();
+    } catch (err: unknown) {
+      onNotify("error", err instanceof Error ? err.message : "Błąd sieci");
+    }
+    setStatusBusy(false);
+  };
+
+  const deleteTicket = async () => {
+    if (!confirm("Czy na pewno chcesz usunąć to zgłoszenie wraz z całą historią wiadomości?")) return;
+    try {
+      const res = await apikey(`/admin/support/tickets/${ticketId}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error("Nie udało się usunąć zgłoszenia");
+      onNotify("success", "Zgłoszenie usunięte");
+      onChanged();
+      onClose();
+    } catch (err: unknown) {
+      onNotify("error", err instanceof Error ? err.message : "Błąd sieci");
+    }
+  };
+
+  if (loading && !ticket) {
+    return (
+      <ModalShell title="Zgłoszenie" icon={MessageSquare} onClose={onClose} footer={<span />}>
+        <div className="grid gap-3">{[1, 2, 3].map((i) => <div key={i} className="h-16 bg-surface-raised rounded-xl animate-pulse" />)}</div>
+      </ModalShell>
+    );
+  }
+  if (!ticket) return null;
+
+  const role = roleLabel(ticket.user.role);
+  const blocked = ticket.user.id === currentUserId || ticket.user.role > myRole;
+
+  return (
+    <ModalShell title={ticket.subject} icon={MessageSquare} onClose={onClose} size="lg"
+      footer={
+        <>
+          <NovButton variant="danger" size="none" onClick={deleteTicket}
+            className="px-4 py-2.5 rounded-xl text-sm font-semibold mr-auto"
+          ><Trash2 size={14} /> Usuń zgłoszenie</NovButton>
+          <NovButton variant="outline" size="none" onClick={onClose}
+            className="px-5 py-2.5 rounded-xl text-sm font-semibold"
+          >Zamknij</NovButton>
+          <NovButton variant="main" size="none" onClick={sendReply} disabled={sending || !reply.trim()}
+            className="px-5 py-2.5 rounded-xl text-sm font-semibold"
+          >{sending ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />} Wyślij odpowiedź</NovButton>
+        </>
+      }
+    >
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-2 space-y-4 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            {ticketStatusBadge(ticket.status)}
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${(PRIORITY_META[ticket.priority] || PRIORITY_META.NORMAL).cls}`}>
+              Priorytet: {(PRIORITY_META[ticket.priority] || PRIORITY_META.NORMAL).label}
+            </span>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-surface-raised text-ink-muted">
+              {TICKET_CATEGORY_LABEL[ticket.category] || ticket.category}
+            </span>
+            <span className="text-xs text-ink-subtle ml-auto">#{ticket.id.slice(0, 8)}</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-semibold text-ink-muted mr-1">Status:</span>
+            {Object.entries(TICKET_STATUS_META).map(([value, meta]) => (
+              <NovButton unstyled key={value} disabled={statusBusy} onClick={() => changeStatus(value)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer disabled:opacity-50 ${
+                  ticket.status === value ? "bg-main text-white border-main" : "bg-surface border-edge text-ink-muted hover:border-main/40 hover:text-main"
+                }`}
+              >{meta.label}</NovButton>
+            ))}
+          </div>
+
+          <div className="bg-surface-raised border border-edge rounded-2xl divide-y divide-edge max-h-[40vh] overflow-y-auto">
+            {ticket.messages.map((m) => {
+              const isSupport = m.authorType === "support";
+              return (
+                <div key={m.id} className={`p-4 ${isSupport ? "bg-main/5" : ""}`}>
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="text-xs font-bold flex items-center gap-1.5">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                        isSupport ? "bg-main text-white" : "bg-surface border border-edge text-ink-muted"
+                      }`}>
+                        {isSupport ? <Shield size={10} /> : <Users size={10} />}
+                        {isSupport ? `Support${m.authorName ? ` · ${m.authorName}` : ""}` : "Klient"}
+                      </span>
+                    </span>
+                    <span className="text-[11px] text-ink-subtle">{fmtDateTime(m.createdAt)}</span>
+                  </div>
+                  <p className="text-sm text-ink whitespace-pre-wrap leading-relaxed">{m.body}</p>
+                </div>
+              );
+            })}
+            {ticket.messages.length === 0 && (
+              <div className="p-6 text-center text-sm text-ink-subtle">Brak wiadomości</div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs font-semibold text-ink-muted">Twoja odpowiedź</label>
+              <span className="flex items-center gap-1 text-[11px] text-ink-subtle"><Mail size={11} /> klient otrzyma e-mail</span>
+            </div>
+            <NovTextarea unstyled value={reply} onChange={(e) => setReply(e.target.value)}
+              placeholder="Napisz odpowiedź dla klienta..."
+              className="w-full px-4 py-3 rounded-xl border border-edge text-sm focus:outline-none focus:ring-2 focus:ring-main/30 resize-none h-32"
+            />
+            {emailFailed && (
+              <p className="text-xs text-amber-600 font-semibold">Ostatni e-mail nie został dostarczony — sprawdź konfigurację SMTP.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4 min-w-0">
+          <div className="bg-surface-raised border border-edge rounded-2xl p-4 space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wide text-ink-subtle">Klient</div>
+            <div className="flex items-center gap-2">
+              <div className="h-9 w-9 rounded-full bg-main/10 flex items-center justify-center shrink-0">
+                <Users size={15} className="text-main" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-bold text-ink truncate">{ticket.user.username}</div>
+                <div className="text-xs text-ink-muted truncate">{ticket.user.email}</div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold ${role.cls}`}>{role.label} ({ticket.user.role})</span>
+              {ticket.user.isBanned && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700">Zablokowany</span>}
+              {ticket.user.isDisabled && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700">Wyłączony</span>}
+              {ticket.user.strikes > 0 && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-700">{ticket.user.strikes} strike(s)</span>}
+              {!ticket.user.isVerified && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-surface text-ink-muted border border-edge">Niezweryfikowany</span>}
+            </div>
+            <div className="text-[11px] text-ink-subtle">Konto od: {new Date(ticket.user.createdAt).toLocaleDateString("pl-PL")}</div>
+            <NovButton variant="danger" size="none" fullWidth disabled={blocked}
+              onClick={() => onPunish(ticket.user.id, ticket.user.username)}
+              className="px-3 py-2 rounded-xl text-xs font-bold"
+              title={blocked ? "Nie możesz karać tego użytkownika" : "Otwórz panel kar"}
+            ><Gavel size={13} /> Ukarz użytkownika</NovButton>
+          </div>
+
+          <div className="bg-surface-raised border border-edge rounded-2xl p-4 space-y-2 text-xs text-ink-muted">
+            <div className="text-xs font-bold uppercase tracking-wide text-ink-subtle mb-1">Szczegóły</div>
+            <div className="flex justify-between gap-2"><span>Utworzono</span><span className="text-ink font-medium">{fmtDateTime(ticket.createdAt)}</span></div>
+            <div className="flex justify-between gap-2"><span>Ostatnia wiadomość</span><span className="text-ink font-medium">{fmtDateTime(ticket.lastMessageAt)}</span></div>
+            <div className="flex justify-between gap-2"><span>Liczba wiadomości</span><span className="text-ink font-medium">{ticket.messageCount}</span></div>
+            {ticket.assignedTo && (
+              <div className="flex justify-between gap-2"><span>Przypisane do</span><span className="text-ink font-medium">{ticket.assignedTo}</span></div>
+            )}
+            <div className="flex justify-between gap-2"><span>Powiadomienia e-mail</span><span className="text-ink font-medium">{ticket.user.notificationsEnabled ? "włączone" : "wyłączone"}</span></div>
+          </div>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+function ReportDetailModal({ report: initial, onClose, onChanged, onPunish, onNotify, myRole, currentUserId }: {
+  report: ReportRecord;
+  onClose: () => void;
+  onChanged: (updated: ReportRecord) => void;
+  onPunish: (userId: string, username: string) => void;
+  onNotify: (type: "success" | "error", message: string) => void;
+  myRole: number;
+  currentUserId: string;
+}) {
+  const [report, setReport] = useState<ReportRecord>(initial);
+  const [resolution, setResolution] = useState(initial.resolution || "");
+  const [saving, setSaving] = useState(false);
+  const [related, setRelated] = useState<ReportRecord[]>([]);
+  const [contentUser, setContentUser] = useState<SupportUser | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (report.targetUserId) params.set("userId", report.targetUserId);
+    if (report.contentId) params.set("contentId", report.contentId);
+    if ([...params.keys()].length > 0) {
+      apikey(`/admin/support/related?${params}`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : []))
+        .then((rows: ReportRecord[]) => setRelated(rows.filter((r) => r.id !== report.id)))
+        .catch(() => {});
+    }
+    if (report.targetUserId) {
+      apikey(`/admin/users/${report.targetUserId}`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((u: (SupportUser & { lastIp?: string | null }) | null) => { if (u) setContentUser(u); })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report.id]);
+
+  const applyStatus = async (status: string) => {
+    setSaving(true);
+    try {
+      const res = await apikey(`/admin/support/reports/${report.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ status, resolution: resolution.trim() || undefined }),
+      });
+      if (!res.ok) { const err = await res.json().catch(() => ({}) as { message?: string }); throw new Error(err.message || "Nie udało się zaktualizować zgłoszenia"); }
+      const updated = await res.json() as ReportRecord;
+      setReport(updated);
+      onChanged(updated);
+      onNotify("success", `Status: ${(REPORT_STATUS_META[status] || { label: status }).label}`);
+    } catch (err: unknown) {
+      onNotify("error", err instanceof Error ? err.message : "Błąd sieci");
+    }
+    setSaving(false);
+  };
+
+  const deleteReport = async () => {
+    if (!confirm("Czy na pewno chcesz usunąć to zgłoszenie?")) return;
+    try {
+      const res = await apikey(`/admin/support/reports/${report.id}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error("Nie udało się usunąć zgłoszenia");
+      onNotify("success", "Zgłoszenie usunięte");
+      onChanged(report);
+      onClose();
+    } catch (err: unknown) {
+      onNotify("error", err instanceof Error ? err.message : "Błąd sieci");
+    }
+  };
+
+  const deleteContent = async () => {
+    if (!report.contentId) return;
+    if (!confirm("Czy na pewno chcesz trwale usunąć tę treść?")) return;
+    try {
+      const res = await apikey(`/admin/articles/${report.contentId}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) { const err = await res.json().catch(() => ({}) as { message?: string }); throw new Error(err.message || "Nie udało się usunąć treści"); }
+      onNotify("success", "Treść usunięta");
+    } catch (err: unknown) {
+      onNotify("error", err instanceof Error ? err.message : "Błąd sieci");
+    }
+  };
+
+  const isUserReport = report.type === "USER";
+  const role = contentUser ? roleLabel(contentUser.role) : null;
+  const blocked = !contentUser || contentUser.id === currentUserId || contentUser.role > myRole;
+
+  return (
+    <ModalShell title="Zgłoszenie naruszenia" icon={Flag} onClose={onClose} size="lg"
+      footer={
+        <>
+          <NovButton variant="danger" size="none" onClick={deleteReport}
+            className="px-4 py-2.5 rounded-xl text-sm font-semibold mr-auto"
+          ><Trash2 size={14} /> Usuń zgłoszenie</NovButton>
+          <NovButton variant="outline" size="none" onClick={onClose}
+            className="px-5 py-2.5 rounded-xl text-sm font-semibold"
+          >Zamknij</NovButton>
+          <NovButton variant="main" size="none" onClick={() => applyStatus("RESOLVED")} disabled={saving}
+            className="px-5 py-2.5 rounded-xl text-sm font-semibold"
+          >{saving ? <RefreshCw size={14} className="animate-spin" /> : <CircleCheck size={14} />} Zapisz rozstrzygnięcie</NovButton>
+        </>
+      }
+    >
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-2 space-y-4 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+              isUserReport ? "bg-purple-100 text-purple-700" : "bg-cyan-100 text-cyan-700"
+            }`}>
+              {isUserReport ? <Users size={11} /> : <FileText size={11} />}
+              {isUserReport ? "Zgłoszenie użytkownika" : "Zgłoszenie treści"}
+            </span>
+            {reportStatusBadge(report.status)}
+            <span className="text-xs text-ink-subtle ml-auto">{fmtDateTime(report.createdAt)}</span>
+          </div>
+
+          <div className="bg-surface-raised border border-edge rounded-2xl p-4 space-y-2">
+            <div className="text-xs font-bold uppercase tracking-wide text-ink-subtle">Powód</div>
+            <p className="text-sm font-semibold text-ink">{report.reason}</p>
+            {report.details && <p className="text-sm text-ink-muted whitespace-pre-wrap">{report.details}</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-ink-muted mb-1">Notatka / decyzja moderacyjna</label>
+            <NovTextarea unstyled value={resolution} onChange={(e) => setResolution(e.target.value)}
+              placeholder="Opisz podjęte działania lub powód odrzucenia zgłoszenia..."
+              className="w-full px-4 py-3 rounded-xl border border-edge text-sm focus:outline-none focus:ring-2 focus:ring-main/30 resize-none h-28"
+            />
+            <div className="flex items-center gap-1.5 flex-wrap mt-2">
+              <span className="text-xs font-semibold text-ink-muted mr-1">Ustaw status:</span>
+              {Object.entries(REPORT_STATUS_META).map(([value, meta]) => (
+                <NovButton unstyled key={value} disabled={saving} onClick={() => applyStatus(value)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer disabled:opacity-50 ${
+                    report.status === value ? "bg-main text-white border-main" : "bg-surface border-edge text-ink-muted hover:border-main/40 hover:text-main"
+                  }`}
+                >{meta.label}</NovButton>
+              ))}
+            </div>
+          </div>
+
+          {related.length > 0 && (
+            <div className="bg-surface-raised border border-edge rounded-2xl p-4 space-y-2">
+              <div className="text-xs font-bold uppercase tracking-wide text-ink-subtle">
+                Powiązane zgłoszenia ({related.length})
+              </div>
+              {related.slice(0, 5).map((r) => (
+                <div key={r.id} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-ink truncate">{r.reason}</span>
+                  {reportStatusBadge(r.status)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4 min-w-0">
+          <div className="bg-surface-raised border border-edge rounded-2xl p-4 space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wide text-ink-subtle">
+              {isUserReport ? "Zgłoszony użytkownik" : "Zgłoszona treść"}
+            </div>
+            {isUserReport ? (
+              contentUser ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <div className="h-9 w-9 rounded-full bg-main/10 flex items-center justify-center shrink-0">
+                      <Users size={15} className="text-main" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold text-ink truncate">{contentUser.username}</div>
+                      <div className="text-xs text-ink-muted truncate">{contentUser.email}</div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {role && <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold ${role.cls}`}>{role.label} ({contentUser.role})</span>}
+                    {contentUser.isBanned && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700">Zablokowany</span>}
+                    {contentUser.isDisabled && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700">Wyłączony</span>}
+                    {contentUser.strikes > 0 && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-700">{contentUser.strikes} strike(s)</span>}
+                  </div>
+                  <NovButton variant="danger" size="none" fullWidth disabled={blocked}
+                    onClick={() => onPunish(contentUser.id, contentUser.username)}
+                    className="px-3 py-2 rounded-xl text-xs font-bold"
+                  ><Gavel size={13} /> Ukarz użytkownika</NovButton>
+                </>
+              ) : (
+                <div className="text-sm text-ink-muted">
+                  @{report.targetUsername || "?"}
+                  <p className="text-xs text-ink-subtle mt-1">Nie znaleziono konta (usunięte?)</p>
+                </div>
+              )
+            ) : (
+              <>
+                <div className="text-sm font-semibold text-ink break-words">{report.contentLabel || "—"}</div>
+                <div className="text-xs text-ink-subtle font-mono break-all">{report.contentId}</div>
+                {report.contentId && (
+                  <NovButton variant="danger" size="none" fullWidth onClick={deleteContent}
+                    className="px-3 py-2 rounded-xl text-xs font-bold"
+                  ><Trash2 size={13} /> Usuń treść</NovButton>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="bg-surface-raised border border-edge rounded-2xl p-4 space-y-2 text-xs text-ink-muted">
+            <div className="text-xs font-bold uppercase tracking-wide text-ink-subtle mb-1">Zgłaszający</div>
+            <div className="text-ink font-medium">{report.reporterUsername || "—"}</div>
+            <div className="flex justify-between gap-2"><span>Zgłoszono</span><span className="text-ink font-medium">{fmtDateTime(report.createdAt)}</span></div>
+            {report.resolvedAt && (
+              <div className="flex justify-between gap-2"><span>Rozstrzygnięto</span><span className="text-ink font-medium">{fmtDateTime(report.resolvedAt)}</span></div>
+            )}
+          </div>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+function PunishUserModal({ userId, username, onClose, onChanged, onNotify, myRole }: {
+  userId: string;
+  username: string;
+  onClose: () => void;
+  onChanged: () => void;
+  onNotify: (type: "success" | "error", message: string) => void;
+  myRole: number;
+}) {
+  const [user, setUser] = useState<(SupportUser & { lastIp?: string | null }) | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [warnReason, setWarnReason] = useState("");
+  const [banReason, setBanReason] = useState("");
+  const [banDuration, setBanDuration] = useState("1440");
+  const [banIp, setBanIp] = useState(false);
+  const [ipReason, setIpReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const fetchUser = async () => {
+    try {
+      const res = await apikey(`/admin/users/${userId}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Nie udało się pobrać użytkownika");
+      setUser(await res.json());
+    } catch (err: unknown) {
+      onNotify("error", err instanceof Error ? err.message : "Błąd sieci");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchUser(); }, [userId]);
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try { await fn(); }
+    catch (err: unknown) { onNotify("error", err instanceof Error ? err.message : "Błąd sieci"); }
+    setBusy(false);
+  };
+
+  const post = async (path: string, method: string, body?: unknown) => {
+    const res = await apikey(path, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      credentials: "include",
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}) as { message?: string });
+      throw new Error(err.message || "Akcja nie powiodła się");
+    }
+    return res.json().catch(() => ({}));
+  };
+
+  const warn = () => run(async () => {
+    if (warnReason.trim().length < 3) { onNotify("error", "Podaj powód ostrzeżenia"); return; }
+    await post("/admin/support/warn", "POST", { userId, reason: warnReason.trim(), strikes: 1 });
+    setWarnReason("");
+    onNotify("success", `Ostrzeżenie dodane — @${username}`);
+    await fetchUser();
+    onChanged();
+  });
+
+  const ban = () => run(async () => {
+    const body: Record<string, unknown> = { reason: banReason.trim() || undefined, banIp };
+    if (banDuration !== "0") body.unbanDate = new Date(Date.now() + Number(banDuration) * 60_000).toISOString();
+    await post(`/admin/users/${userId}/ban`, "POST", body);
+    onNotify("success", `@${username} zablokowany`);
+    await fetchUser();
+    onChanged();
+  });
+
+  const unban = () => run(async () => {
+    await post(`/admin/users/${userId}/unban`, "POST");
+    onNotify("success", `@${username} odblokowany`);
+    await fetchUser();
+    onChanged();
+  });
+
+  const toggleDisable = () => run(async () => {
+    if (!user) return;
+    if (user.isDisabled) {
+      await post(`/admin/users/${userId}`, "PUT", { isDisabled: false });
+      onNotify("success", "Konto włączone");
+    } else {
+      if (!confirm("Czy na pewno chcesz WYŁĄCZYĆ to konto?")) return;
+      await post(`/admin/users/${userId}`, "PUT", { isDisabled: true });
+      onNotify("success", "Konto wyłączone");
+    }
+    await fetchUser();
+    onChanged();
+  });
+
+  const banCurrentIp = () => run(async () => {
+    if (!user?.lastIp) { onNotify("error", "Brak znanego adresu IP"); return; }
+    await post("/admin/ipbans", "POST", {
+      ip: user.lastIp,
+      reason: ipReason.trim() || `Ban powiązany z kontem: ${username}`,
+      expiresMinutes: 1440,
+    });
+    onNotify("success", `IP ${user.lastIp} zablokowane na 24h`);
+    setIpReason("");
+  });
+
+  const removeUser = () => run(async () => {
+    if (!confirm(`Czy na pewno usunąć konto @${username}? Akcja jest nieodwracalna (RODO).`)) return;
+    await post(`/admin/users/${userId}`, "DELETE");
+    onNotify("success", "Użytkownik usunięty");
+    onChanged();
+    onClose();
+  });
+
+  const outranks = !!user && user.role > myRole;
+
+  return (
+    <ModalShell title={`Kary: ${username}`} icon={Gavel} onClose={onClose}
+      footer={<NovButton variant="outline" size="none" onClick={onClose} className="px-5 py-2.5 rounded-xl text-sm font-semibold">Zamknij</NovButton>}
+    >
+      {loading || !user ? (
+        <div className="grid gap-3">{[1, 2, 3].map((i) => <div key={i} className="h-16 bg-surface-raised rounded-xl animate-pulse" />)}</div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 flex-wrap p-3 rounded-xl bg-surface-raised border border-edge">
+            <span className="text-sm font-bold text-ink">{user.username}</span>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold ${roleLabel(user.role).cls}`}>{roleLabel(user.role).label} ({user.role})</span>
+            {user.isBanned && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700">Zablokowany</span>}
+            {user.isDisabled && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700">Wyłączony</span>}
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-700">{user.strikes} strike(s)</span>
+            {user.lastIp && <span className="ml-auto font-mono text-xs text-ink-muted">{user.lastIp}</span>}
+          </div>
+
+          {outranks && (
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-700 flex items-center gap-2">
+              <AlertTriangle size={14} /> Ranga tego użytkownika jest wyższa od Twojej — akcje mogą zostać odrzucone.
+            </div>
+          )}
+
+          <div className="border border-edge rounded-2xl p-4 space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wide text-ink-muted flex items-center gap-1.5"><AlertTriangle size={13} className="text-amber-500" /> Ostrzeżenie</div>
+            <NovInput unstyled value={warnReason} onChange={(e) => setWarnReason(e.target.value)}
+              placeholder="Powód ostrzeżenia (widoczny w historii moderacji)"
+              className={inputCls}
+            />
+            <NovButton variant="outline" size="none" onClick={warn} disabled={busy}
+              className="px-4 py-2 rounded-xl text-xs font-semibold"
+            ><AlertTriangle size={13} /> Dodaj strike (+1)</NovButton>
+          </div>
+
+          <div className="border border-edge rounded-2xl p-4 space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wide text-ink-muted flex items-center gap-1.5"><Ban size={13} className="text-red-500" /> Blokada konta</div>
+            {user.isBanned ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-ink-muted">
+                  Konto zablokowane{user.unbanDate ? ` do ${fmtDateTime(user.unbanDate)}` : " bezterminowo"}.
+                </span>
+                <NovButton variant="outline" size="none" onClick={unban} disabled={busy}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold"
+                ><Check size={13} /> Odblokuj</NovButton>
+              </div>
+            ) : (
+              <>
+                <NovInput unstyled value={banReason} onChange={(e) => setBanReason(e.target.value)}
+                  placeholder="Powód blokady (tagi lub opis)" className={inputCls}
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-ink-muted mb-1">Czas trwania</label>
+                    <NovSelect unstyled className={inputCls + " bg-surface"} value={banDuration} onChange={(e) => setBanDuration(e.target.value)}>
+                      <option value="60">1 godzina</option>
+                      <option value="360">6 godzin</option>
+                      <option value="1440">24 godziny</option>
+                      <option value="10080">7 dni</option>
+                      <option value="43200">30 dni</option>
+                      <option value="0">Bezterminowo</option>
+                    </NovSelect>
+                  </div>
+                  <label className="flex items-end gap-2 pb-2 text-xs font-semibold text-ink-muted cursor-pointer select-none">
+                    <NovCheckbox unstyled checked={banIp} onChange={setBanIp}
+                      className="rounded border-edge-strong text-main focus:ring-main/30"
+                    />
+                    Zablokuj też IP
+                  </label>
+                </div>
+                <NovButton variant="danger" size="none" onClick={ban} disabled={busy}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold"
+                ><Ban size={13} /> Zablokuj konto</NovButton>
+              </>
+            )}
+          </div>
+
+          <div className="border border-edge rounded-2xl p-4 space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wide text-ink-muted flex items-center gap-1.5"><Power size={13} className="text-indigo-500" /> Konto i adres IP</div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <NovButton variant="outline" size="none" onClick={toggleDisable} disabled={busy}
+                className="px-4 py-2 rounded-xl text-xs font-semibold"
+              ><Power size={13} /> {user.isDisabled ? "Włącz konto" : "Wyłącz konto"}</NovButton>
+              <NovButton variant="outline" size="none" onClick={banCurrentIp} disabled={busy || !user.lastIp}
+                className="px-4 py-2 rounded-xl text-xs font-semibold"
+                title={user.lastIp ? "Zablokuj ostatni adres IP na 24 godziny" : "Brak znanego adresu IP"}
+              ><ShieldOff size={13} /> Ban IP (24h)</NovButton>
+            </div>
+            <NovInput unstyled value={ipReason} onChange={(e) => setIpReason(e.target.value)}
+              placeholder="Powód bana IP (opcjonalnie)" className={inputCls}
+            />
+          </div>
+
+          <div className="border border-red-200 rounded-2xl p-4 space-y-3 bg-red-50/40">
+            <div className="text-xs font-bold uppercase tracking-wide text-red-600 flex items-center gap-1.5"><Trash2 size={13} /> Strefa zagrożenia</div>
+            <NovButton variant="danger" size="none" onClick={removeUser} disabled={busy}
+              className="px-4 py-2 rounded-xl text-xs font-semibold"
+            ><Trash2 size={13} /> Usuń konto użytkownika</NovButton>
+          </div>
+        </div>
+      )}
+    </ModalShell>
   );
 }

@@ -20,10 +20,12 @@ import {
   EyeOff,
   Facebook,
   FileText,
+  Flag,
   Globe,
   ImagePlus,
   Instagram,
   KeyRound,
+  LifeBuoy,
   Link2,
   Link2Off,
   Loader2,
@@ -31,12 +33,15 @@ import {
   LogOut,
   Mail,
   MapPin,
+  MessageSquare,
   Monitor,
   Moon,
   Palette,
   Droplet,
+  Plus,
   Power,
   ScrollText,
+  Send,
   Shield,
   Smartphone,
   Sparkles,
@@ -56,6 +61,7 @@ import {
   NovButton,
   NovIconButton,
   NovInput,
+  NovSelect,
   NovSwitch,
   NovTextarea,
   AnimatedThemeToggler,
@@ -119,6 +125,7 @@ type SubSectionId =
   | "appearance-theme"
   | "appearance-accent"
   | "appearance-language"
+  | "support-tickets"
   | "danger-account";
 
 interface SectionConfig {
@@ -187,6 +194,12 @@ const CATEGORIES: CategoryConfig[] = [
     ],
   },
   {
+    id: "support",
+    label: "settings.category.support",
+    icon: LifeBuoy,
+    subs: [{ id: "support-tickets", label: "settings.section.support", icon: LifeBuoy }],
+  },
+  {
     id: "danger",
     label: "settings.category.danger",
     icon: AlertTriangle,
@@ -208,6 +221,7 @@ function normalizeTab(raw: string | null): SubSectionId | null {
   if (raw === "profile") return "profile-basic";
   if (raw === "privacy") return "privacy-consent";
   if (raw === "account") return "profile-basic";
+  if (raw === "support") return "support-tickets";
   if (raw === "danger") return "danger-account";
   if (raw === "security") return "account-email";
   if (raw === "account-disable" || raw === "danger-disable" || raw === "danger-delete") return "danger-account";
@@ -1216,6 +1230,506 @@ function DevicesSection() {
         )}
       </div>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Support section (customer tickets + user/content reports)
+// ---------------------------------------------------------------------------
+
+interface SupportTicketRow {
+  id: string;
+  subject: string;
+  category: string;
+  status: string;
+  priority: string;
+  createdAt: string;
+  lastMessageAt: string;
+  messageCount: number;
+  lastMessage: { body: string; authorType: string; authorName: string | null; createdAt: string } | null;
+}
+
+interface SupportTicketMessage {
+  id: string;
+  authorType: string;
+  authorName: string | null;
+  body: string;
+  createdAt: string;
+}
+
+interface SupportTicketThread {
+  id: string;
+  subject: string;
+  category: string;
+  status: string;
+  messages: SupportTicketMessage[];
+}
+
+interface SupportReportRow {
+  id: string;
+  type: string;
+  reason: string;
+  details: string | null;
+  status: string;
+  targetUsername: string | null;
+  contentLabel: string | null;
+  createdAt: string;
+}
+
+const SUPPORT_STATUS_LABEL: Record<string, string> = {
+  OPEN: "settings.support.statusOpen",
+  PENDING: "settings.support.statusPending",
+  RESOLVED: "settings.support.statusResolved",
+  CLOSED: "settings.support.statusClosed",
+  REVIEWING: "settings.support.statusReviewing",
+  DISMISSED: "settings.support.statusDismissed",
+};
+
+const SUPPORT_STATUS_CLS: Record<string, string> = {
+  OPEN: "bg-blue-100 text-blue-700",
+  PENDING: "bg-amber-100 text-amber-700",
+  RESOLVED: "bg-emerald-100 text-emerald-700",
+  CLOSED: "bg-surface-raised text-ink-muted",
+  REVIEWING: "bg-amber-100 text-amber-700",
+  DISMISSED: "bg-surface-raised text-ink-muted",
+};
+
+const SUPPORT_CATEGORIES = [
+  ["GENERAL", "settings.support.catGeneral"],
+  ["ACCOUNT", "settings.support.catAccount"],
+  ["BILLING", "settings.support.catBilling"],
+  ["BUG", "settings.support.catBug"],
+  ["CONTENT", "settings.support.catContent"],
+  ["OTHER", "settings.support.catOther"],
+] as const;
+
+function SupportStatusBadge({ status, t }: { status: string; t: (k: string) => string }) {
+  const key = SUPPORT_STATUS_LABEL[status];
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+        SUPPORT_STATUS_CLS[status] || "bg-surface-raised text-ink-muted"
+      }`}
+    >
+      {key ? t(key) : status}
+    </span>
+  );
+}
+
+function SupportSection() {
+  const { t } = useI18n();
+
+  const [tickets, setTickets] = useState<SupportTicketRow[]>([]);
+  const [ticketsLoading, setTicketsLoading] = useState(true);
+  const [ticketsError, setTicketsError] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [category, setCategory] = useState("GENERAL");
+  const [message, setMessage] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [thread, setThread] = useState<SupportTicketThread | null>(null);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [reply, setReply] = useState("");
+  const [replying, setReplying] = useState(false);
+  const [replyError, setReplyError] = useState("");
+
+  const [reports, setReports] = useState<SupportReportRow[]>([]);
+  const [reportsLoading, setReportsLoading] = useState(true);
+  const [reportType, setReportType] = useState("USER");
+  const [reportTarget, setReportTarget] = useState("");
+  const [reportReason, setReportReason] = useState("");
+  const [reportDetails, setReportDetails] = useState("");
+  const [sendingReport, setSendingReport] = useState(false);
+  const [reportError, setReportError] = useState("");
+  const [reportNotice, setReportNotice] = useState("");
+
+  const fetchTickets = async () => {
+    try {
+      const res = await fetch(`${API_URL}/support/tickets`, { credentials: "include" });
+      if (!res.ok) throw new Error();
+      setTickets(await res.json());
+      setTicketsError("");
+    } catch {
+      setTicketsError(t("settings.support.loadError"));
+    } finally {
+      setTicketsLoading(false);
+    }
+  };
+
+  const fetchReports = async () => {
+    try {
+      const res = await fetch(`${API_URL}/support/reports`, { credentials: "include" });
+      if (!res.ok) throw new Error();
+      setReports(await res.json());
+    } catch {
+      /* silent — the card shows an empty state */
+    } finally {
+      setReportsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const load = async () => {
+      await Promise.all([fetchTickets(), fetchReports()]);
+    };
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const createTicket = async () => {
+    if (subject.trim().length < 3 || message.trim().length < 2) {
+      setCreateError(t("settings.support.validation"));
+      return;
+    }
+    setCreating(true);
+    setCreateError("");
+    try {
+      const res = await fetch(`${API_URL}/support/tickets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ subject: subject.trim(), category, message: message.trim() }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(err.message || t("settings.support.sendError"));
+      }
+      setSubject("");
+      setMessage("");
+      setCreateOpen(false);
+      await fetchTickets();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : t("settings.support.sendError"));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const loadThread = async (id: string) => {
+    setExpandedId(id);
+    setThread(null);
+    setReply("");
+    setReplyError("");
+    setThreadLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/support/tickets/${id}`, { credentials: "include" });
+      if (!res.ok) throw new Error();
+      setThread(await res.json());
+    } catch {
+      setReplyError(t("settings.support.loadError"));
+    } finally {
+      setThreadLoading(false);
+    }
+  };
+
+  const toggleThread = (id: string) => {
+    if (expandedId === id) {
+      setExpandedId(null);
+      setThread(null);
+      return;
+    }
+    loadThread(id);
+  };
+
+  const sendReply = async () => {
+    if (!thread || !reply.trim()) return;
+    setReplying(true);
+    setReplyError("");
+    try {
+      const res = await fetch(`${API_URL}/support/tickets/${thread.id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ body: reply.trim() }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(err.message || t("settings.support.sendError"));
+      }
+      setReply("");
+      await loadThread(thread.id);
+      await fetchTickets();
+    } catch (err) {
+      setReplyError(err instanceof Error ? err.message : t("settings.support.sendError"));
+    } finally {
+      setReplying(false);
+    }
+  };
+
+  const sendReport = async () => {
+    if (reportReason.trim().length < 3) {
+      setReportError(t("settings.support.validation"));
+      return;
+    }
+    setSendingReport(true);
+    setReportError("");
+    setReportNotice("");
+    try {
+      const body: Record<string, unknown> = {
+        type: reportType,
+        reason: reportReason.trim(),
+        details: reportDetails.trim() || undefined,
+      };
+      if (reportType === "USER") body.targetUsername = reportTarget.trim();
+      else body.contentId = reportTarget.trim();
+      const res = await fetch(`${API_URL}/support/reports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(err.message || t("settings.support.sendError"));
+      }
+      setReportTarget("");
+      setReportReason("");
+      setReportDetails("");
+      setReportNotice(t("settings.support.reportSent"));
+      await fetchReports();
+    } catch (err) {
+      setReportError(err instanceof Error ? err.message : t("settings.support.sendError"));
+    } finally {
+      setSendingReport(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card clip={false}>
+        <CardHeader
+          title={t("settings.support.myTickets")}
+          icon={<LifeBuoy size={15} className="text-main shrink-0" />}
+          description={t("settings.support.desc")}
+          action={
+            <NovButton
+              type="button"
+              variant="plain"
+              onClick={() => { setCreateOpen((v) => !v); setCreateError(""); }}
+              className="bg-main text-white hover:brightness-110 font-semibold rounded-xl px-3.5 py-2 text-xs shadow-md shadow-main/10 cursor-pointer flex items-center gap-1.5 shrink-0"
+            >
+              {createOpen ? <X size={13} /> : <Plus size={13} />}
+              {createOpen ? t("settings.cancel") : t("settings.support.newTicket")}
+            </NovButton>
+          }
+        />
+        <div className="px-5 py-4 space-y-3">
+          {createOpen && (
+            <div className="border border-main/25 bg-main/5 rounded-2xl p-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-bold text-ink-muted mb-1">{t("settings.support.subject")}</label>
+                  <NovInput unstyled value={subject} onChange={(e) => setSubject(e.target.value)} className={inputCls} maxLength={140} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-ink-muted mb-1">{t("settings.support.category")}</label>
+                  <NovSelect unstyled value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
+                    {SUPPORT_CATEGORIES.map(([value, key]) => (
+                      <option key={value} value={value}>{t(key)}</option>
+                    ))}
+                  </NovSelect>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-ink-muted mb-1">{t("settings.support.message")}</label>
+                <NovTextarea unstyled value={message} onChange={(e) => setMessage(e.target.value)} rows={4} className={inputCls + " resize-none"} />
+              </div>
+              {createError && <p className="text-[11px] font-bold text-rose-600">{createError}</p>}
+              <div className="flex items-center justify-end gap-2">
+                <NovButton type="button" variant="ghost" size="none" onClick={() => setCreateOpen(false)} className="px-3.5 py-2 rounded-xl text-xs font-bold">
+                  {t("settings.cancel")}
+                </NovButton>
+                <NovButton type="button" variant="main" size="none" onClick={createTicket} disabled={creating} className="px-4 py-2 rounded-xl text-xs font-bold">
+                  {creating ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                  {t("settings.support.send")}
+                </NovButton>
+              </div>
+            </div>
+          )}
+
+          {ticketsError && <p className="text-xs font-bold text-rose-600 py-2">{ticketsError}</p>}
+
+          {ticketsLoading ? (
+            <div className="flex items-center gap-2 py-6 justify-center text-ink-subtle">
+              <Loader2 size={16} className="animate-spin" />
+              <span className="text-xs">{t("settings.support.loading")}</span>
+            </div>
+          ) : tickets.length === 0 && !ticketsError ? (
+            <p className="text-xs text-ink-subtle text-center py-6">{t("settings.support.noTickets")}</p>
+          ) : (
+            <div className="divide-y divide-edge border border-edge rounded-2xl overflow-hidden">
+              {tickets.map((ticket) => {
+                const open = expandedId === ticket.id;
+                return (
+                  <div key={ticket.id} className="bg-surface">
+                    <button
+                      type="button"
+                      onClick={() => toggleThread(ticket.id)}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-raised transition-colors cursor-pointer"
+                    >
+                      <MessageSquare size={15} className="text-main shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-ink truncate">{ticket.subject}</span>
+                          <SupportStatusBadge status={ticket.status} t={t} />
+                        </div>
+                        <p className="text-[10px] text-ink-subtle truncate mt-0.5">
+                          {ticket.lastMessage?.body || t("settings.support.emptyThread")} · {ticket.messageCount}{" "}
+                          {t("settings.support.messagesCount")}
+                        </p>
+                      </div>
+                      <ChevronDown size={14} className={`text-ink-subtle shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {open && (
+                      <div className="border-t border-edge bg-surface-raised/60 px-4 py-3 space-y-3">
+                        {threadLoading || !thread ? (
+                          <div className="flex items-center gap-2 py-4 justify-center text-ink-subtle">
+                            <Loader2 size={14} className="animate-spin" />
+                            <span className="text-[11px]">{t("settings.support.loading")}</span>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="space-y-2 max-h-72 overflow-y-auto">
+                              {thread.messages.map((m) => {
+                                const isSupport = m.authorType === "support";
+                                return (
+                                  <div
+                                    key={m.id}
+                                    className={`p-3 rounded-xl border text-xs ${
+                                      isSupport ? "bg-main/5 border-main/20" : "bg-surface border-edge"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-2 mb-1">
+                                      <span className="font-bold text-ink">
+                                        {isSupport ? (m.authorName || t("settings.support.team")) : t("settings.support.you")}
+                                      </span>
+                                      <span className="text-[10px] text-ink-subtle">
+                                        {new Date(m.createdAt).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                                      </span>
+                                    </div>
+                                    <p className="text-ink-muted whitespace-pre-wrap leading-relaxed">{m.body}</p>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {thread.status !== "CLOSED" ? (
+                              <div className="space-y-2">
+                                <NovTextarea
+                                  unstyled
+                                  value={reply}
+                                  onChange={(e) => setReply(e.target.value)}
+                                  rows={3}
+                                  placeholder={t("settings.support.replyPlaceholder")}
+                                  className={inputCls + " resize-none"}
+                                />
+                                {replyError && <p className="text-[11px] font-bold text-rose-600">{replyError}</p>}
+                                <div className="flex justify-end">
+                                  <NovButton type="button" variant="main" size="none" onClick={sendReply} disabled={replying || !reply.trim()} className="px-4 py-2 rounded-xl text-xs font-bold">
+                                    {replying ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                                    {t("settings.support.sendReply")}
+                                  </NovButton>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-[11px] text-ink-subtle text-center">{t("settings.support.closed")}</p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Card clip={false}>
+        <CardHeader
+          title={t("settings.support.reportTitle")}
+          icon={<Flag size={15} className="text-main shrink-0" />}
+          description={t("settings.support.reportDesc")}
+        />
+        <div className="px-5 py-4 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-bold text-ink-muted mb-1">{t("settings.support.reportType")}</label>
+              <NovSelect unstyled value={reportType} onChange={(e) => setReportType(e.target.value)} className={inputCls}>
+                <option value="USER">{t("settings.support.reportUser")}</option>
+                <option value="CONTENT">{t("settings.support.reportContent")}</option>
+              </NovSelect>
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-ink-muted mb-1">
+                {reportType === "USER" ? t("settings.support.targetUser") : t("settings.support.targetContent")}
+              </label>
+              <NovInput
+                unstyled
+                value={reportTarget}
+                onChange={(e) => setReportTarget(e.target.value)}
+                placeholder={reportType === "USER" ? "@nazwa" : t("settings.support.targetContentHint")}
+                className={inputCls}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-ink-muted mb-1">{t("settings.support.reason")}</label>
+            <NovInput unstyled value={reportReason} onChange={(e) => setReportReason(e.target.value)} className={inputCls} maxLength={120} />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-ink-muted mb-1">{t("settings.support.details")}</label>
+            <NovTextarea unstyled value={reportDetails} onChange={(e) => setReportDetails(e.target.value)} rows={3} className={inputCls + " resize-none"} />
+          </div>
+          {reportError && <p className="text-[11px] font-bold text-rose-600">{reportError}</p>}
+          {reportNotice && <p className="text-[11px] font-bold text-emerald-600">{reportNotice}</p>}
+          <div className="flex justify-end">
+            <NovButton type="button" variant="main" size="none" onClick={sendReport} disabled={sendingReport} className="px-4 py-2 rounded-xl text-xs font-bold">
+              {sendingReport ? <Loader2 size={13} className="animate-spin" /> : <Flag size={13} />}
+              {t("settings.support.reportSend")}
+            </NovButton>
+          </div>
+
+          <div>
+            <p className="text-[11px] font-bold text-ink-muted uppercase tracking-wider mb-2">{t("settings.support.myReports")}</p>
+            {reportsLoading ? (
+              <div className="flex items-center gap-2 py-4 justify-center text-ink-subtle">
+                <Loader2 size={14} className="animate-spin" />
+              </div>
+            ) : reports.length === 0 ? (
+              <p className="text-xs text-ink-subtle py-3">{t("settings.support.noReports")}</p>
+            ) : (
+              <div className="divide-y divide-edge border border-edge rounded-2xl overflow-hidden">
+                {reports.map((r) => (
+                  <div key={r.id} className="flex items-start justify-between gap-3 px-4 py-3 bg-surface">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full ${
+                          r.type === "USER" ? "bg-purple-100 text-purple-700" : "bg-cyan-100 text-cyan-700"
+                        }`}>
+                          {r.type === "USER" ? t("settings.support.reportUser") : t("settings.support.reportContent")}
+                        </span>
+                        <span className="text-xs font-bold text-ink truncate">{r.reason}</span>
+                      </div>
+                      <p className="text-[10px] text-ink-subtle truncate mt-0.5">
+                        {r.type === "USER" ? `@${r.targetUsername || "?"}` : r.contentLabel || r.id}
+                        {" · "}
+                        {new Date(r.createdAt).toLocaleDateString("pl-PL")}
+                      </p>
+                    </div>
+                    <SupportStatusBadge status={r.status} t={t} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+    </div>
   );
 }
 
@@ -3405,6 +3919,8 @@ active
         return (
           <LanguageSection />
         );
+      case "support-tickets":
+        return <SupportSection />;
       case "danger-account":
         return (
           <Card tone="danger">
